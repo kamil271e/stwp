@@ -41,8 +41,13 @@ The examined features include key meteorological parameters, each contributing t
 
 
 ### Prediction Quality Visualization
+For both visualizations below, the forecasting horizon is set to 1, representing the prediction timestamp t+1, which corresponds to a projection 6 hours into the future.
 
-In the demonstration below, we showcase the prediction quality of the graph architecture using a randomly selected learning example. The forecasting horizon is set to 1, representing the prediction timestamp t+1, which corresponds to a projection 6 hours into the future:
+The video underneath demonstrates a prediction using the graph model after fine-tuning for temperatures 2m above ground for the first 3 weeks of January 2021:
+
+https://github.com/kamil271e/stwp/assets/82380348/73e4b688-76f8-4e89-b2ae-458219b54844
+
+In the demonstration below, we highlight the prediction quality for all features of the graph architecture using a randomly selected training example.
 ![gnn_sample_pred-1](https://github.com/iwamaciek/stwp/assets/82380348/12a3a40e-4baa-4274-807d-fa742fa7d710)
 
 
