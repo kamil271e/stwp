@@ -190,7 +190,7 @@ class DataProcessor:
 
     @staticmethod
     def train_test_split(
-        X, y, split_ratio=cfg.TRAIN_RATIO, split_type=2, test_shuffle=True
+        X, y, split_ratio=cfg.TRAIN_RATIO, split_type=2, test_shuffle=False
     ):
         return DataProcessor.train_val_test_split(
             X, y, split_ratio, split_type, test_shuffle
@@ -198,7 +198,7 @@ class DataProcessor:
 
     @staticmethod
     def train_val_test_split(
-        X, y, split_ratio=cfg.TRAIN_RATIO, split_type=1, test_shuffle=True
+        X, y, split_ratio=cfg.TRAIN_RATIO, split_type=1, test_shuffle=False
     ):
         """
         split_type=0: X_train (2020), X_val (2021), X_test (2022)
