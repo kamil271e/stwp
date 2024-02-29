@@ -20,8 +20,6 @@ fastapi~=0.105.0
 uvicorn
 pygrib
 catboost~=1.2.2
-fastapi
-uvicorn
 seaborn~=0.13.0
 pandas~=2.1.4
 lightgbm~=4.1.0
