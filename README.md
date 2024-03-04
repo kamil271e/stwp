@@ -40,7 +40,7 @@ The examined features include key meteorological parameters, each contributing t
 | tp     | Total precipitation                  | mm       |
 
 ### Results and analysis
-Objective functions used for evaluating model performance include MAE and RMSE. Below are the average scores for the entire test set (year 2021) across all baselines (SLR - Simple Linear Regression, LR - Linear Regression, GB - Gradient Boosting Trees, U-NET), the graph architecture, [TIGGE](https://www.ecmwf.int/en/research/projects/tigge) - a representative of the NWP paradigm, and NAIVE method - an average of train set. Each model takes 5 weather states as input and predicts one step into the future.
+Objective functions used for evaluating model performance include MAE and RMSE. Below are the average scores for the entire test set (year 2021) across all baselines (SLR - Simple Linear Regression, LR - Linear Regression, GB - Gradient Boosting Trees, U-NET), the graph architecture, [TIGGE](https://www.ecmwf.int/en/research/projects/tigge) - a representative of the [NWP](https://www.weather.gov/media/ajk/brochures/NumericalWeatherPrediction.pdf) paradigm, and NAIVE method - an average of train set. Each model takes 5 weather states as input and predicts one step into the future.
 <table>
 <tr><th>RMSE Results</th><th>MAE Results</th></tr>
 <tr><td>
