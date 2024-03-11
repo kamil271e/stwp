@@ -3,29 +3,15 @@
 
 This repository is specifically designed for the research component of the engineering thesis titled "A Machine Learning System for Short-Term Weather Prediction." It encompasses not only the implementation of baseline models and the main architecture but also includes modules for data preprocessing, training pipelines, hyperparameter optimization, result presentation, an API facilitating communication with a [mobile application](https://github.com/JaJasiok/meteo-mind/) for the best model, and scripts for downloading data from the [ERA5](https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels) dataset.
 
-### Install prerequisites:
-```shell
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
+### Prediction Quality Visualization
+For both visualizations below, the forecasting horizon is set to 1, representing the prediction timestamp t+1, which corresponds to a projection 6 hours into the future.
 
-### Config pre-commit hooks
-<!-- Instruction [here](pre-commit-instruction.md). -->
-```shell
-pip install -r requirements.txt
-pre-commit install
-```
+The video underneath demonstrates a prediction using the graph model after fine-tuning for temperatures 2m above ground for the first 3 weeks of January 2021:
 
-### API dockerization
-Create image:
-```shell
-docker build -t meteo-api ./api
-```
-Run the container
-```shell
-docker run -it --rm -p 8080:8888 --name api meteo-api
-```
+https://github.com/kamil271e/stwp/assets/82380348/73e4b688-76f8-4e89-b2ae-458219b54844
+
+In the demonstration below, we highlight the prediction quality for all features of the graph architecture using a randomly selected training example.
+![gnn_sample_pred-1](https://github.com/iwamaciek/stwp/assets/82380348/12a3a40e-4baa-4274-807d-fa742fa7d710)
 
 ### Feature Examination
 The examined features include key meteorological parameters, each contributing to a comprehensive understanding of atmospheric conditions. The table below outlines these features along with their respective symbols, quantities, and units:
@@ -84,14 +70,27 @@ In a significant achievement, we integrated our top-performing solution with a s
  
 More detailed analyses regarding each feature are included in the thesis.
 
-### Prediction Quality Visualization
-For both visualizations below, the forecasting horizon is set to 1, representing the prediction timestamp t+1, which corresponds to a projection 6 hours into the future.
 
-The video underneath demonstrates a prediction using the graph model after fine-tuning for temperatures 2m above ground for the first 3 weeks of January 2021:
+### Install prerequisites:
+```shell
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-https://github.com/kamil271e/stwp/assets/82380348/73e4b688-76f8-4e89-b2ae-458219b54844
+### Config pre-commit hooks
+<!-- Instruction [here](pre-commit-instruction.md). -->
+```shell
+pip install -r requirements.txt
+pre-commit install
+```
 
-In the demonstration below, we highlight the prediction quality for all features of the graph architecture using a randomly selected training example.
-![gnn_sample_pred-1](https://github.com/iwamaciek/stwp/assets/82380348/12a3a40e-4baa-4274-807d-fa742fa7d710)
-
-
+### API dockerization
+Create image:
+```shell
+docker build -t meteo-api ./api
+```
+Run the container
+```shell
+docker run -it --rm -p 8080:8888 --name api meteo-api
+```
