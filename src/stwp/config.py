@@ -9,7 +9,7 @@ backwards compatibility with older code in the models/ directory.
 
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import ClassVar, Literal
 
 import torch
 
@@ -29,6 +29,10 @@ def _get_device() -> torch.device:
 @dataclass
 class Config:
     """Configuration for STWP models and training."""
+
+    # Class-level defaults (accessible as Config.ATTR without instantiation)
+    # These are for backwards compatibility with code accessing Config.X directly
+    train_ration: ClassVar[float] = 0.333  # Note: typo preserved for compatibility
 
     # Device configuration
     device: torch.device = field(default_factory=_get_device)

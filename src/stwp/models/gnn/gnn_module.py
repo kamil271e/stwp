@@ -1,11 +1,21 @@
 """Graph Neural Network module for weather prediction."""
 
+from enum import StrEnum
+
 import torch
 import torch.nn as nn
 from torch_geometric.nn.conv import CGConv, GATConv, GENConv, PDNConv, TransformerConv
 
 from stwp.config import Config
 from stwp.models.gnn.st_encoder_module import SpatioTemporalEncoder
+
+
+class ArchitectureType(StrEnum):
+    TRANSFORMER = "transformer"
+    CGC = "cgc"
+    GAT = "gat"
+    GEN = "gen"
+    PDN = "pdn"
 
 
 class GNNModule(torch.nn.Module):
@@ -21,7 +31,7 @@ class GNNModule(torch.nn.Module):
         input_s_dim: int = 6,
         input_size: int | None = None,
         fh: int | None = None,
-        arch: str = "trans",
+        architecture: ArchitectureType = ArchitectureType.TRANSFORMER,
         num_graph_cells: int | None = None,
     ):
         """Initialize the GNN module.
@@ -48,13 +58,13 @@ class GNNModule(torch.nn.Module):
         self.st_encoder = SpatioTemporalEncoder(hidden_dim, input_t_dim, input_s_dim, hidden_dim)
         self.layer_norm_embed = nn.LayerNorm(hidden_dim)
         self.gnns: nn.ModuleList | None = None
-        self._choose_graph_cells(arch, hidden_dim, edge_dim, num_graph_cells)
+        self._choose_graph_cells(architecture, hidden_dim, edge_dim, num_graph_cells)
         self.mlp_decoder = nn.Linear(hidden_dim, output_features * fh)
         self.fh = fh
 
     def _choose_graph_cells(
         self,
-        arch: str,
+        architecture: ArchitectureType,
         hidden_dim: int,
         edge_dim: int,
         num_graph_cells: int,
@@ -67,7 +77,7 @@ class GNNModule(torch.nn.Module):
             edge_dim: Edge attribute dimension
             num_graph_cells: Number of graph cells
         """
-        if arch == "trans":
+        if architecture == ArchitectureType.TRANSFORMER:
             self.gnns = nn.ModuleList(
                 [
                     TransformerConv(
@@ -78,11 +88,11 @@ class GNNModule(torch.nn.Module):
                     for _ in range(num_graph_cells)
                 ]
             )
-        elif arch == "cgc":
+        elif architecture == ArchitectureType.CGC:
             self.gnns = nn.ModuleList(
                 [CGConv(hidden_dim, edge_dim, aggr="mean") for _ in range(num_graph_cells)]
             )
-        elif arch == "gat":
+        elif architecture == ArchitectureType.GAT:
             self.gnns = nn.ModuleList(
                 [
                     GATConv(
@@ -93,7 +103,7 @@ class GNNModule(torch.nn.Module):
                     for _ in range(num_graph_cells)
                 ]
             )
-        elif arch == "gen":
+        elif architecture == ArchitectureType.GEN:
             self.gnns = nn.ModuleList(
                 [
                     GENConv(
@@ -104,7 +114,7 @@ class GNNModule(torch.nn.Module):
                     )
                 ]
             )
-        elif arch == "pdn":
+        elif architecture == ArchitectureType.PDN:
             self.gnns = nn.ModuleList(
                 [
                     PDNConv(
@@ -117,7 +127,7 @@ class GNNModule(torch.nn.Module):
                 ]
             )
         else:
-            raise NotImplementedError(f"Architecture {arch} not implemented")
+            raise NotImplementedError(f"Architecture {architecture} not implemented")
 
     def forward(
         self,

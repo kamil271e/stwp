@@ -1,5 +1,7 @@
 """Simple linear regression models for weather prediction."""
 
+from __future__ import annotations
+
 import copy
 from typing import TYPE_CHECKING, Any
 
@@ -7,11 +9,10 @@ import numpy as np
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 
 from stwp.data.processor import DataProcessor
-from stwp.models.base import BaselineRegressor, Scaler, RegressorType, get_radius
+from stwp.models.base import BaselineRegressor, RegressorType, Scaler, get_radius
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
 
 LinearModel = ElasticNet | Lasso | LinearRegression | Ridge
 
@@ -54,7 +55,9 @@ class SimpleLinearRegressor(BaselineRegressor):
             raise ValueError(f"{regressor_type} regressor not implemented")
 
         self.model: LinearModel = regressor_map[regressor_type]
-        self.models: list[LinearModel] = [copy.deepcopy(self.model) for _ in range(self.num_features)]
+        self.models: list[LinearModel] = [
+            copy.deepcopy(self.model) for _ in range(self.num_features)
+        ]
 
     def train(
         self,

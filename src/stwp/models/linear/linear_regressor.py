@@ -5,7 +5,7 @@ from typing import Any
 
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 
-from stwp.models.base import BaselineRegressor, Scaler, RegressorType
+from stwp.models.base import BaselineRegressor, RegressorType, Scaler
 
 LinearModel = ElasticNet | Lasso | LinearRegression | Ridge
 
@@ -45,4 +45,6 @@ class LinearRegressor(BaselineRegressor):
             raise ValueError(f"{regressor_type} regressor not implemented")
 
         self.model: LinearModel = regressor_map[regressor_type]
-        self.models: list[LinearModel] = [copy.deepcopy(self.model) for _ in range(self.num_features)]
+        self.models: list[LinearModel] = [
+            copy.deepcopy(self.model) for _ in range(self.num_features)
+        ]

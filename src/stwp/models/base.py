@@ -1,8 +1,11 @@
 """Baseline regressor model."""
 
+from __future__ import annotations
+
 import copy
 import os
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import cartopy.crs as ccrs
@@ -13,9 +16,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler, RobustScaler, StandardScaler
 
 from stwp.data.processor import DataProcessor
-from stwp.utils.visualization import draw_poland
 from stwp.features import Features
-from enum import StrEnum
+from stwp.utils.visualization import draw_poland
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -107,7 +109,9 @@ class BaselineRegressor:
             y_train: Training targets
             normalize: Whether to normalize targets
         """
-        if len(str(self.__class__).split(".")) < 4:  # BaselineRegressor # TODO: i dont understand this '4'
+        if (
+            len(str(self.__class__).split(".")) < 4
+        ):  # BaselineRegressor # TODO: i dont understand this '4'
             y_mean = np.mean(y_train, axis=0)
             self.model.constant = y_mean
 
@@ -296,7 +300,9 @@ class BaselineRegressor:
         Returns:
             Predictions array
         """
-        if len(str(self.__class__).split(".")) < 4:  # BaselineRegressor # TODO: i dont understand this '4'
+        if (
+            len(str(self.__class__).split(".")) < 4
+        ):  # BaselineRegressor # TODO: i dont understand this '4'
             y_mean = np.tile(self.model.constant, (y_test.shape[0], 1, 1, 1, 1))
             return y_mean
 

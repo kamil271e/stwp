@@ -1,13 +1,15 @@
 """Exponential smoothing models for weather prediction."""
 
+from __future__ import annotations
+
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from statsmodels.tsa.api import SimpleExpSmoothing
 
-from stwp.models.base import BaselineRegressor
 from stwp.features import Features
-from enum import StrEnum
+from stwp.models.base import BaselineRegressor
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -19,10 +21,12 @@ SMOOTHING_PARAMS: dict[str, float] = {
     Features.TCC: 0.6,
 }
 
+
 class SmoothingType(StrEnum):
     SIMPLE = "simple"
     HOLT = "holt"
     SEASONAL = "seasonal"
+
 
 class InitializationMethod(StrEnum):
     ESTIMATED = "estimated"
@@ -59,8 +63,7 @@ class SmoothingPredictor(BaselineRegressor):
             raise ValueError(f"Smoothing type {smoothing_type} not implemented")
 
         self.params = [
-            SMOOTHING_PARAMS.get(fname, DEFAULT_SMOOTHING_PARAM)
-            for fname in self.feature_list
+            SMOOTHING_PARAMS.get(fname, DEFAULT_SMOOTHING_PARAM) for fname in self.feature_list
         ]
 
     def train(
