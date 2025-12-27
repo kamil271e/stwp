@@ -1,7 +1,5 @@
 """Data download utilities for ERA5 reanalysis data."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 

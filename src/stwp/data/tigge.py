@@ -1,7 +1,5 @@
 """TIGGE (THORPEX Interactive Grand Global Ensemble) data download utilities."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 

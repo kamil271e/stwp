@@ -140,6 +140,9 @@ cython_debug/
 # ruff
 .ruff_cache/
 
+# CDS API credentials
+.cdsapirc
+
 # macOS
 .DS_Store
 

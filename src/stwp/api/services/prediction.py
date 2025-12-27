@@ -9,6 +9,15 @@ from typing import Any
 import numpy as np
 
 from stwp.config import Config
+from stwp.constants import (
+    COORD_RESOLUTION,
+    DATA_UPDATE_INTERVAL_SECONDS,
+    ERA5_DATA_LAG_DAYS,
+    FORECAST_TIMES,
+    HOUR_TO_SEQUENCE_MAP,
+    HOURS_PER_INTERVAL,
+    MS_TO_KMH,
+)
 from stwp.data.download import DataImporter
 from stwp.models.gnn.trainer import Trainer
 
@@ -37,7 +46,7 @@ class PredictionService:
         self._data_importer = DataImporter()
 
         # Coordinate settings
-        self._coord_acc = 0.25
+        self._coord_acc = COORD_RESOLUTION
         self._lat_min: float | None = None
         self._lat_max: float | None = None
         self._lng_min: float | None = None
@@ -52,16 +61,16 @@ class PredictionService:
         if self._json_data is None or self._last_update is None:
             return True
 
-        # Data from 7 days ago due to ERA5 availability lag
-        current_date = datetime.now() - timedelta(days=7)
+        # Data from N days ago due to ERA5 availability lag
+        current_date = datetime.now() - timedelta(days=ERA5_DATA_LAG_DAYS)
         elapsed = (current_date - self._last_update).total_seconds()
 
-        # Refresh every 6 hours
-        return elapsed > 21600
+        # Refresh based on configured interval
+        return elapsed > DATA_UPDATE_INTERVAL_SECONDS
 
     def _download_data(self) -> None:
         """Download current weather data from ERA5."""
-        current_date = datetime.now() - timedelta(days=7)
+        current_date = datetime.now() - timedelta(days=ERA5_DATA_LAG_DAYS)
         previous_day = current_date - timedelta(days=1)
 
         # Set year range
@@ -87,7 +96,7 @@ class PredictionService:
             years=years,
             months=months,
             days=days,
-            times=["00:00", "06:00", "12:00", "18:00"],
+            times=list(FORECAST_TIMES),
         )
 
     def _refresh_data(self) -> None:
@@ -102,10 +111,9 @@ class PredictionService:
         trainer.load_model(str(self._model_path))
 
         # Determine which sequence to use based on current hour
-        current_date = datetime.now() - timedelta(days=7)
-        most_recent_hour = (current_date.hour // 6) * 6
-        sequence_map = {0: 0, 6: 1, 12: 2, 18: 3}
-        which_sequence = sequence_map.get(most_recent_hour, 0)
+        current_date = datetime.now() - timedelta(days=ERA5_DATA_LAG_DAYS)
+        most_recent_hour = (current_date.hour // HOURS_PER_INTERVAL) * HOURS_PER_INTERVAL
+        which_sequence = HOUR_TO_SEQUENCE_MAP.get(most_recent_hour, 0)
 
         # Generate predictions
         self._json_data = trainer.predict_to_json(which_sequence=which_sequence)
@@ -326,7 +334,10 @@ class PredictionService:
             "u10": np.array(
                 [
                     [
-                        [json_data[lat][lng]["u10"][ts] * 3.6 for ts in json_data[lat][lng]["u10"]]
+                        [
+                            json_data[lat][lng]["u10"][ts] * MS_TO_KMH
+                            for ts in json_data[lat][lng]["u10"]
+                        ]
                         for lng in json_data[lat]
                     ]
                     for lat in json_data
@@ -335,7 +346,10 @@ class PredictionService:
             "v10": np.array(
                 [
                     [
-                        [json_data[lat][lng]["v10"][ts] * 3.6 for ts in json_data[lat][lng]["v10"]]
+                        [
+                            json_data[lat][lng]["v10"][ts] * MS_TO_KMH
+                            for ts in json_data[lat][lng]["v10"]
+                        ]
                         for lng in json_data[lat]
                     ]
                     for lat in json_data

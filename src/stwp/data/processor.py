@@ -1,7 +1,5 @@
 """Data processor for weather data loading and preprocessing."""
 
-from __future__ import annotations
-
 import copy
 from datetime import datetime
 from typing import Any
@@ -314,7 +312,7 @@ class DataProcessor:
         Returns:
             Tuple of arrays depending on split_type
         """
-        split_ratio = split_ratio if split_ratio is not None else Config.train_ration
+        split_ratio = split_ratio if split_ratio is not None else Config.train_ratio
         train_samples = int(split_ratio * len(X))
 
         if split_type == 0:

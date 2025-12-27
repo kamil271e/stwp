@@ -2,14 +2,11 @@
 
 This is the primary configuration class for STWP. It supports configuration
 via environment variables with the STWP_ prefix.
-
-Note: There is a legacy LegacyConfig class in models/config.py for
-backwards compatibility with older code in the models/ directory.
 """
 
 import os
 from dataclasses import dataclass, field
-from typing import ClassVar, Literal
+from typing import Literal
 
 import torch
 
@@ -30,15 +27,12 @@ def _get_device() -> torch.device:
 class Config:
     """Configuration for STWP models and training."""
 
-    # Class-level defaults (accessible as Config.ATTR without instantiation)
-    # These are for backwards compatibility with code accessing Config.X directly
-    train_ration: ClassVar[float] = 0.333  # Note: typo preserved for compatibility
-
     # Device configuration
     device: torch.device = field(default_factory=_get_device)
 
     # Data paths
     data_path: str = field(default_factory=lambda: os.getenv("STWP_DATA_PATH", "data/input.grib"))
+    model_path: str = field(default_factory=lambda: os.getenv("STWP_MODEL_PATH", "data/gnn_fh5.pt"))
 
     # Training configuration
     train_ratio: float = field(

@@ -45,7 +45,7 @@ class GNNModule(torch.nn.Module):
             input_s_dim: Spatial input dimension
             input_size: Number of input timesteps
             fh: Forecast horizon
-            arch: Architecture type (trans, cgc, gat, gen, pdn)
+            architecture: Architecture type (trans, cgc, gat, gen, pdn)
             num_graph_cells: Number of graph convolution cells
         """
         super().__init__()

@@ -110,6 +110,10 @@ make check         # Run all checks (lint + typecheck)
 
 ### Running the API
 
+Before running the API, you need to configure CDS API credentials for downloading weather data:
+1. Copy `api/.cdsapirc.example` to `api/.cdsapirc`
+2. Replace placeholders with your credentials from [CDS](https://cds.climate.copernicus.eu/)
+
 Locally:
 ```shell
 make api

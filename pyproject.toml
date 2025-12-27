@@ -58,7 +58,7 @@ dev = [
 ]
 
 [project.scripts]
-stwp-api = "stwp.api.main:run_server"
+stwp-api = "stwp.api.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -135,10 +135,3 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 
-[dependency-groups]
-dev = [
-    "httpx>=0.28.1",
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "tabulate>=0.9.0",
-]

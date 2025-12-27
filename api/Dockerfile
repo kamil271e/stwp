@@ -5,6 +5,9 @@ WORKDIR /app
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
+# Create non-root user
+RUN useradd -m -u 1000 app
+
 # Copy project files
 COPY pyproject.toml uv.lock ./
 COPY src/ ./src/
@@ -12,11 +15,14 @@ COPY src/ ./src/
 # Install dependencies
 RUN uv sync --frozen --no-dev
 
-# Copy CDS API credentials
-COPY api/.cdsapirc /root/
+# CDS API credentials: Mount at runtime or provide via environment
+# Option 1: Mount file at runtime: -v ~/.cdsapirc:/home/app/.cdsapirc:ro
+# Option 2: Set environment variables CDS_API_URL and CDS_API_KEY
+# See api/.cdsapirc.example for format
 
-# Set timezone
+# Set timezone and user
 ENV TZ=Europe/Warsaw
+USER app
 
 # Expose port
 EXPOSE 8888

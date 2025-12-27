@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import os
 from datetime import datetime
 from enum import StrEnum
@@ -22,6 +23,14 @@ from stwp.utils.visualization import draw_poland
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+logger = logging.getLogger(__name__)
+
+# Input shape dimension counts
+# Shape with neighbours: (samples, lat, lon, neighbours, input_state, features)
+SHAPE_WITH_NEIGHBOURS_DIMS = 6
+# Shape without neighbours: (samples, lat, lon, input_state, features)
+SHAPE_WITHOUT_NEIGHBOURS_DIMS = 5
+
 
 class Scaler:
     MIN_MAX: type[MinMaxScaler] = MinMaxScaler
@@ -37,8 +46,8 @@ class RegressorType(StrEnum):
     ELASTIC_NET = "elastic_net"
 
 
-# emprically determined
 def get_radius(neighbours: int) -> int:
+    """Get grid radius based on neighbour count (empirically determined)."""
     if neighbours <= 5:
         return 1
     elif neighbours <= 13:
@@ -47,7 +56,6 @@ def get_radius(neighbours: int) -> int:
         return 3
 
 
-# TODO: magic numbers handling
 class BaselineRegressor:
     """Baseline regressor using mean prediction."""
 
@@ -64,13 +72,15 @@ class BaselineRegressor:
         """Initialize the baseline regressor.
 
         Args:
-            X_shape: Shape of input data
+            X_shape: Shape of input data. Expected shapes:
+                - With neighbours: (samples, lat, lon, neighbours, input_state, features)
+                - Without neighbours: (samples, lat, lon, input_state, features)
             fh: Forecast horizon
             feature_list: List of feature names
             scaler_type: Type of scaler to use
         """
-        # TODO: I don't understand this '5' check here
-        if len(X_shape) > 5:
+        has_neighbours = len(X_shape) == SHAPE_WITH_NEIGHBOURS_DIMS
+        if has_neighbours:
             (
                 _,
                 self.latitude,
@@ -112,9 +122,8 @@ class BaselineRegressor:
             y_train: Training targets
             normalize: Whether to normalize targets
         """
-        if (
-            len(str(self.__class__).split(".")) < 4
-        ):  # BaselineRegressor # TODO: i dont understand this '4'
+        # Base class uses mean prediction; subclasses override with their own logic
+        if self.__class__.__name__ == "BaselineRegressor":
             y_mean = np.mean(y_train, axis=0)
             self.model.constant = y_mean
 
@@ -256,7 +265,9 @@ class BaselineRegressor:
                 mae = mean_absolute_error(y_test_sample_feature_j, y_hat_sample_feature_j)
                 std = np.std(y_test_sample_feature_j)
                 sqrt_n = np.sqrt(y_test_sample_feature_j.shape[0])
-                print(f"{cur_feature} => RMSE:  {rmse}; MAE: {mae}; SE: {std / sqrt_n}")
+                logger.info(
+                    f"{cur_feature} => RMSE: {rmse:.4f}; MAE: {mae:.4f}; SE: {std / sqrt_n:.4f}"
+                )
 
                 for k in range(3 * self.fh):
                     ts = k // 3
@@ -303,9 +314,8 @@ class BaselineRegressor:
         Returns:
             Predictions array
         """
-        if (
-            len(str(self.__class__).split(".")) < 4
-        ):  # BaselineRegressor # TODO: i dont understand this '4'
+        # Base class returns tiled mean; subclasses use model predictions
+        if self.__class__.__name__ == "BaselineRegressor":
             y_mean = np.tile(self.model.constant, (y_test.shape[0], 1, 1, 1, 1))
             return y_mean
 
@@ -349,15 +359,15 @@ class BaselineRegressor:
         if plot:
             self.plot_predictions(y_hat, y_test, max_samples=max_samples)
         rmse_scores, mae_scores = self.evaluate(y_hat, y_test)
-        print("=======================================")
-        print("Evaluation metrics for entire test set:")
-        print("=======================================")
+        logger.info("=" * 40)
+        logger.info("Evaluation metrics for entire test set:")
+        logger.info("=" * 40)
 
         sqrt_n = np.sqrt(y_test.shape[0] * self.latitude * self.longitude * self.fh)
         for i in range(self.num_features):
-            print(
-                f"{self.feature_list[i]} => RMSE: {rmse_scores[i]};  "
-                f"MAE: {mae_scores[i]}; SE: {np.std(y_test[..., i]) / sqrt_n}"
+            logger.info(
+                f"{self.feature_list[i]} => RMSE: {rmse_scores[i]:.4f}; "
+                f"MAE: {mae_scores[i]:.4f}; SE: {np.std(y_test[..., i]) / sqrt_n:.4f}"
             )
 
         return y_hat

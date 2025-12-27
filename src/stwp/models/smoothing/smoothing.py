@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -58,7 +59,12 @@ class SmoothingPredictor(BaselineRegressor):
         if smoothing_type == SmoothingType.SIMPLE:
             self.type = smoothing_type
         elif smoothing_type in (SmoothingType.HOLT, SmoothingType.SEASONAL):
-            raise DeprecationWarning("holt and seasonal smoothing are not supported")
+            warnings.warn(
+                "Holt and seasonal smoothing are deprecated and not supported",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            raise NotImplementedError("Holt and seasonal smoothing are not supported")
         else:
             raise ValueError(f"Smoothing type {smoothing_type} not implemented")
 

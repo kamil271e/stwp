@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,8 @@ from stwp.utils.visualization import draw_poland
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from torch_geometric.loader import DataLoader
+
+logger = logging.getLogger(__name__)
 
 
 class Trainer:
@@ -216,7 +219,9 @@ class Trainer:
             last_lr = self.optimizer.param_groups[0]["lr"]
 
             if verbose:
-                print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_loss:.5f}, lr: {last_lr}")
+                logger.info(
+                    f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_loss:.5f}, lr: {last_lr}"
+                )
 
             self.model.eval()
             with torch.no_grad():
@@ -244,7 +249,7 @@ class Trainer:
             val_loss_list.append(avg_val_loss)
 
             if verbose:
-                print(f"Val Loss: {avg_val_loss:.5f}\n---------")
+                logger.info(f"Val Loss: {avg_val_loss:.5f}")
 
             self.lr_callback.step(avg_val_loss)
             self.ckpt_callback.step(avg_val_loss)
@@ -254,7 +259,7 @@ class Trainer:
 
         end = time.time()
         if verbose:
-            print(f"{end - start} [s]")
+            logger.info(f"Training completed in {end - start:.2f} seconds")
             self.plot_loss(val_loss_list, train_loss_list)
 
     @staticmethod
@@ -547,8 +552,8 @@ class Trainer:
             y = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y, flat=False))
         try:
             return self.calculate_metrics(y_hat, y, verbose=verbose), y_hat
-        except Exception as e:
-            print(e)
+        except ValueError as e:
+            logger.exception(f"Error calculating metrics: {e}")
             return None, y_hat
 
     def autoreg_evaluate(
@@ -677,7 +682,9 @@ class Trainer:
             rmse = np.sqrt(mean_squared_error(y_hat_fi, y_fi))
             mae = mean_absolute_error(y_hat_fi, y_fi)
             if verbose:
-                print(f"RMSE for {feature_name}: {rmse}; MAE for {feature_name}: {mae};")
+                logger.info(
+                    f"RMSE for {feature_name}: {rmse:.4f}; MAE for {feature_name}: {mae:.4f}"
+                )
             rmse_features.append(rmse)
             mae_features.append(mae)
         return rmse_features, mae_features
@@ -709,7 +716,7 @@ class Trainer:
         params = 0
         for p in self.model.parameters():
             params += p.reshape(-1).shape[0]
-        print(f"Model parameters: {params}")
+        logger.info(f"Model parameters: {params}")
 
     @staticmethod
     def clip_total_cloud_cover(y_hat: NDArray[Any], idx: int = Features.TCC_IDX) -> NDArray[Any]:
