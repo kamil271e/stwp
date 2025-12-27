@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from stwp.config import Config
+from stwp.config import Config, _Config
 from stwp.constants import (
     COORD_RESOLUTION,
     DATA_UPDATE_INTERVAL_SECONDS,
@@ -30,7 +30,7 @@ class PredictionService:
     def __init__(
         self,
         model_path: str | Path = "data/gnn_fh5.pt",
-        config: Config | None = None,
+        config: _Config | None = None,
     ):
         """Initialize the prediction service.
 

@@ -35,11 +35,10 @@ def main() -> None:
     """Run the API server."""
     import uvicorn
 
-    config = Config()
     uvicorn.run(
         "stwp.api.main:app",
-        host=config.api_host,
-        port=config.api_port,
+        host=Config.api_host,
+        port=Config.api_port,
         reload=False,
     )
 

@@ -3304,6 +3304,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ipykernel" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "cartopy", specifier = ">=0.23.0" },
@@ -3341,6 +3346,9 @@ requires-dist = [
     { name = "xgboost", specifier = ">=2.1.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ipykernel", specifier = ">=7.1.0" }]
 
 [[package]]
 name = "sympy"

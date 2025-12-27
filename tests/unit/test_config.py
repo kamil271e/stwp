@@ -4,7 +4,7 @@ import os
 
 import torch
 
-from stwp.config import Config
+from stwp.config import Config, _Config
 
 
 class TestConfig:
@@ -17,7 +17,7 @@ class TestConfig:
             if key.startswith("STWP_"):
                 del os.environ[key]
 
-        config = Config()
+        config = _Config()
 
         assert config.train_ratio == 0.333
         assert config.batch_size == 8
@@ -35,7 +35,7 @@ class TestConfig:
         os.environ["STWP_TRAIN_RATIO"] = "0.5"
         os.environ["STWP_FORECAST_HORIZON"] = "3"
 
-        config = Config()
+        config = _Config()
 
         assert config.batch_size == 16
         assert config.train_ratio == 0.5
@@ -49,7 +49,7 @@ class TestConfig:
     def test_device_selection(self) -> None:
         """Test device selection logic."""
         os.environ["STWP_DEVICE"] = "cpu"
-        config = Config()
+        config = _Config()
         assert config.device == torch.device("cpu")
         del os.environ["STWP_DEVICE"]
 
@@ -58,7 +58,7 @@ class TestConfig:
         os.environ["STWP_API_HOST"] = "127.0.0.1"
         os.environ["STWP_API_PORT"] = "9000"
 
-        config = Config()
+        config = _Config()
 
         assert config.api_host == "127.0.0.1"
         assert config.api_port == 9000
@@ -66,3 +66,7 @@ class TestConfig:
         # Cleanup
         del os.environ["STWP_API_HOST"]
         del os.environ["STWP_API_PORT"]
+
+    def test_default_instance(self) -> None:
+        """Test that Config is a default instance of _Config."""
+        assert isinstance(Config, _Config)

@@ -24,7 +24,7 @@ def _get_device() -> torch.device:
 
 
 @dataclass
-class Config:
+class _Config:
     """Configuration for STWP models and training."""
 
     # Device configuration
@@ -69,3 +69,7 @@ class Config:
     # API configuration
     api_host: str = field(default_factory=lambda: os.getenv("STWP_API_HOST", "0.0.0.0"))
     api_port: int = field(default_factory=lambda: int(os.getenv("STWP_API_PORT", "8888")))
+
+
+# Default configuration instance - use this throughout the codebase
+Config = _Config()
