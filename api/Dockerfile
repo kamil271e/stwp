@@ -1,21 +1,25 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements ./
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-RUN pip install --no-cache-dir -r requirements
+# Copy project files
+COPY pyproject.toml uv.lock ./
+COPY src/ ./src/
 
-COPY script.sh .
+# Install dependencies
+RUN uv sync --frozen --no-dev
 
-RUN ./script.sh
+# Copy CDS API credentials
+COPY api/.cdsapirc /root/
 
-COPY ./app/ .
-
-COPY ./model /model
-
-COPY ./.cdsapirc /root/
-
+# Set timezone
 ENV TZ=Europe/Warsaw
 
-CMD ["python", "main.py"]
+# Expose port
+EXPOSE 8888
+
+# Run the API
+CMD ["uv", "run", "python", "-m", "stwp.api.main"]

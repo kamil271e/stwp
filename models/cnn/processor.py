@@ -1,8 +1,5 @@
-from models.config import config as cfg
+from models.config import ModelConfig
 
-# from models.gnn.processor import NNDataProcessor
-
-# sys.path.append("..")
 from models.gnn.processor import NNDataProcessor
 
 
@@ -24,7 +21,7 @@ class CNNDataProcessor(NNDataProcessor):
     def preprocess(self, subset=None):
         X_train, X_test, y_train, y_test = self.train_val_test_split()
         X, y = self.fit_transform_scalers(
-            X_train, X_test, y_train, y_test, scaler_type=self.cfg.SCALER_TYPE
+            X_train, X_test, y_train, y_test, scaler_type=self.cfg.scalar_type
         )
         X = X.transpose((0, 1, 3, 2))
         y = y.transpose((0, 1, 3, 2))
@@ -32,12 +29,10 @@ class CNNDataProcessor(NNDataProcessor):
             -1,
             self.num_latitudes,
             self.num_longitudes,
-            self.cfg.INPUT_SIZE,
+            self.cfg.input_size,
             self.num_features,
         )
-        y = y.reshape(
-            -1, self.num_latitudes, self.num_longitudes, cfg.FH, self.num_features
-        )
+        y = y.reshape(-1, self.num_latitudes, self.num_longitudes, ModelConfig.fh, self.num_features)
         self.train_loader, self.val_loader, self.test_loader = self.get_loaders(
             X, y, subset, test_shuffle=self.test_shuffle
         )
@@ -51,7 +46,7 @@ class CNNDataProcessor(NNDataProcessor):
         if flat:
             input_tensor = input_tensor.reshape(
                 (
-                    self.cfg.BATCH_SIZE,
+                    self.cfg.batch_size,
                     self.num_features,
                     self.num_latitudes,
                     self.num_longitudes,

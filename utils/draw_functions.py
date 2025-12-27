@@ -1,13 +1,11 @@
-import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.animation as animation
+import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.cm import coolwarm
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
-from matplotlib.gridspec import GridSpec
-import numpy as np
-import cartopy.crs as ccrs
 from models.data_processor import DataProcessor
 
 
@@ -56,22 +54,32 @@ def create_pred_animation(y, y_hat, num_samples=20):
     ax1 = fig.add_subplot(gs[2], projection=ccrs.Mercator(central_longitude=40))
 
     cax0 = fig.add_subplot(gs[1])
-    cbar0 = ColorbarBase(cax0, cmap=coolwarm, norm=norm, orientation='vertical')
+    cbar0 = ColorbarBase(cax0, cmap=coolwarm, norm=norm, orientation="vertical")
     cbar0.ax.tick_params(labelsize=20)
 
     cax1 = fig.add_subplot(gs[3])
-    cbar1 = ColorbarBase(cax1, cmap=coolwarm, norm=norm, orientation='vertical')
+    cbar1 = ColorbarBase(cax1, cmap=coolwarm, norm=norm, orientation="vertical")
     cbar1.ax.tick_params(labelsize=20)
 
-    ax0.axis('off')
-    ax1.axis('off')
+    ax0.axis("off")
+    ax1.axis("off")
 
     def update(frame):
         ax0.clear()
-        im0 = draw_poland2(ax=ax0, X=y[frame], title=r'$Y_{t2m}$', cmap=coolwarm, norm=norm, method=0, **spatial)
+        im0 = draw_poland(
+            ax=ax0, X=y[frame], title=r"$Y_{t2m}$", cmap=coolwarm, norm=norm, method=0, **spatial
+        )
 
         ax1.clear()
-        im1 = draw_poland2(ax=ax1, X=y_hat[frame], title=r'$\hat{Y}_{t2m}$', cmap=coolwarm, norm=norm, method=0, **spatial)
+        im1 = draw_poland(
+            ax=ax1,
+            X=y_hat[frame],
+            title=r"$\hat{Y}_{t2m}$",
+            cmap=coolwarm,
+            norm=norm,
+            method=0,
+            **spatial,
+        )
 
         plt.tight_layout()
         return [im0, im1]

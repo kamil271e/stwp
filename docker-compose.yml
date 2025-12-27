@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: stwp-api
+    ports:
+      - "8888:8888"
+    environment:
+      - TZ=Europe/Warsaw
+      - STWP_API_HOST=0.0.0.0
+      - STWP_API_PORT=8888
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

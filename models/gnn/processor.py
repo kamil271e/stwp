@@ -1,20 +1,19 @@
+import copy
+
 import numpy as np
 import torch
 import torch_geometric.data as data
-import copy
-import sys
-from torch_geometric.loader import DataLoader
 from sklearn.preprocessing import (
-    MinMaxScaler,
-    StandardScaler,
-    RobustScaler,
     MaxAbsScaler,
+    MinMaxScaler,
+    RobustScaler,
+    StandardScaler,
 )
 from sklearn.utils import shuffle
-from models.config import config as cfg
+from torch_geometric.loader import DataLoader
 
-sys.path.append("..")
-from models.data_processor import DataProcessor
+from stwp.config import Config as cfg  # noqa: N813
+from stwp.data.processor import DataProcessor
 
 
 class NNDataProcessor:
@@ -24,7 +23,7 @@ class NNDataProcessor:
         temporal_encoding=False,
         additional_encodings=False,
         test_shuffle=True,
-        path=cfg.DATA_PATH,
+        path=cfg.data_path,
     ):
         self.data_proc = DataProcessor(
             path=path,
@@ -71,36 +70,34 @@ class NNDataProcessor:
         self.edge_index, self.edge_weights, self.edge_attr = self.create_edges()
         X_train, X_test, y_train, y_test = self.train_val_test_split()
         X, y = self.fit_transform_scalers(
-            X_train, X_test, y_train, y_test, scaler_type=self.cfg.SCALER_TYPE
+            X_train, X_test, y_train, y_test, scaler_type=self.cfg.scalar_type
         )
         self.train_loader, self.val_loader, self.test_loader = self.get_loaders(
             X, y, subset, test_shuffle=self.test_shuffle
         )
 
     def train_val_test_split(self):
-        X, y = self.data_proc.preprocess(self.cfg.INPUT_SIZE, self.cfg.FH)
+        X, y = self.data_proc.preprocess(self.cfg.input_size, self.cfg.forecast_horizon)
 
         self.num_samples = X.shape[0]
-        self.train_size = int(self.num_samples * self.cfg.TRAIN_RATIO)
+        self.train_size = int(self.num_samples * self.cfg.train_ration)
         self.val_size = self.train_size
         self.test_size = self.num_samples - self.train_size - self.val_size
 
         X = X.reshape(
             -1,
-            self.num_latitudes * self.num_longitudes * self.cfg.INPUT_SIZE,
+            self.num_latitudes * self.num_longitudes * self.cfg.input_size,
             self.num_features,
         )
         y = y.reshape(
             -1,
-            self.num_latitudes * self.num_longitudes * self.cfg.FH,
+            self.num_latitudes * self.num_longitudes * self.cfg.forecast_horizon,
             self.num_features,
         )
 
         return self.data_proc.train_val_test_split(X, y, split_type=3)
 
-    def fit_transform_scalers(
-        self, X_train, X_test, y_train, y_test, scaler_type="standard"
-    ):
+    def fit_transform_scalers(self, X_train, X_test, y_train, y_test, scaler_type="standard"):
         if scaler_type == "min_max":
             self.scaler = MinMaxScaler()
         elif scaler_type == "standard":
@@ -115,8 +112,8 @@ class NNDataProcessor:
 
         self.scalers = [copy.deepcopy(self.scaler) for _ in range(self.num_features)]
 
-        Xi_shape = self.num_latitudes * self.num_longitudes * self.cfg.INPUT_SIZE
-        yi_shape = self.num_latitudes * self.num_longitudes * self.cfg.FH
+        Xi_shape = self.num_latitudes * self.num_longitudes * self.cfg.input_size
+        yi_shape = self.num_latitudes * self.num_longitudes * self.cfg.forecast_horizon
 
         for i in range(self.num_features):
             X_train_i = X_train[..., i].reshape(-1, 1)
@@ -126,9 +123,7 @@ class NNDataProcessor:
 
             self.scalers[i].fit(X_train_i)
             X_train[..., i] = (
-                self.scalers[i]
-                .transform(X_train_i)
-                .reshape((self.train_size, Xi_shape))
+                self.scalers[i].transform(X_train_i).reshape((self.train_size, Xi_shape))
             )
             X_test[..., i] = (
                 self.scalers[i]
@@ -136,9 +131,7 @@ class NNDataProcessor:
                 .reshape((self.test_size + self.val_size, Xi_shape))
             )
             y_train[..., i] = (
-                self.scalers[i]
-                .transform(y_train_i)
-                .reshape((self.train_size, yi_shape))
+                self.scalers[i].transform(y_train_i).reshape((self.train_size, yi_shape))
             )
             y_test[..., i] = (
                 self.scalers[i]
@@ -152,11 +145,14 @@ class NNDataProcessor:
         X = X.reshape(
             -1,
             self.num_latitudes * self.num_longitudes,
-            self.cfg.INPUT_SIZE,
+            self.cfg.input_size,
             self.num_features,
         )
         y = y.reshape(
-            -1, self.num_latitudes * self.num_longitudes, self.cfg.FH, self.num_features
+            -1,
+            self.num_latitudes * self.num_longitudes,
+            self.cfg.forecast_horizon,
+            self.num_features,
         )
         X = X.transpose((0, 1, 3, 2))
         y = y.transpose((0, 1, 3, 2))
@@ -176,7 +172,7 @@ class NNDataProcessor:
                     (
                         X.shape[0],
                         self.num_latitudes * self.num_longitudes,
-                        self.cfg.INPUT_SIZE,
+                        self.cfg.input_size,
                     )
                 )
             )
@@ -184,17 +180,24 @@ class NNDataProcessor:
                 self.scalers[i]
                 .inverse_transform(y_i)
                 .reshape(
-                    (y.shape[0], self.num_latitudes * self.num_longitudes, self.cfg.FH)
+                    (
+                        y.shape[0],
+                        self.num_latitudes * self.num_longitudes,
+                        self.cfg.forecast_horizon,
+                    )
                 )
             )
         X = X.reshape(
             -1,
             self.num_latitudes * self.num_longitudes,
-            self.cfg.INPUT_SIZE,
+            self.cfg.input_size,
             self.num_features,
         )
         y = y.reshape(
-            -1, self.num_latitudes * self.num_longitudes, self.cfg.FH, self.num_features
+            -1,
+            self.num_latitudes * self.num_longitudes,
+            self.cfg.forecast_horizon,
+            self.num_features,
         )
         X = X.transpose((0, 1, 3, 2))
         y = y.transpose((0, 1, 3, 2))
@@ -202,7 +205,7 @@ class NNDataProcessor:
 
     def create_edges(self, r=None):
         if r is None:
-            r = self.cfg.R
+            r = self.cfg.r
 
         def node_index(i, j, num_cols):
             return i * num_cols + j
@@ -216,41 +219,32 @@ class NNDataProcessor:
         for la in range(self.num_latitudes):
             for lo in range(self.num_longitudes):
                 for i, j in indices:
-                    if (
-                        -1 < la + i < self.num_latitudes
-                        and -1 < lo + j < self.num_longitudes
-                    ):
+                    if -1 < la + i < self.num_latitudes and -1 < lo + j < self.num_longitudes:
                         edge_index.append(
                             [
                                 node_index(la, lo, self.num_longitudes),
                                 node_index(la + i, lo + j, self.num_longitudes),
                             ]
                         )
-                        edge_attr.append(
-                            [u * i, u * j, np.sqrt((u * i) ** 2 + (u * j) ** 2)]
-                        )
+                        edge_attr.append([u * i, u * j, np.sqrt((u * i) ** 2 + (u * j) ** 2)])
 
-        edge_index = torch.tensor(edge_index, dtype=torch.int64).t().to(self.cfg.DEVICE)
+        edge_index = torch.tensor(edge_index, dtype=torch.int64).t().to(self.cfg.device)
         edge_weights = None
-        edge_attr = torch.tensor(edge_attr, dtype=torch.float32).to(self.cfg.DEVICE)
+        edge_attr = torch.tensor(edge_attr, dtype=torch.float32).to(self.cfg.device)
 
         return edge_index, edge_weights, edge_attr
 
     def get_loaders(self, X, y, subset=None, test_shuffle=True):
         dataset = []
         for i in range(X.shape[0]):
-            Xi = torch.from_numpy(X[i].astype("float32")).to(self.cfg.DEVICE)
-            yi = torch.from_numpy(y[i].astype("float32")).to(self.cfg.DEVICE)
+            Xi = torch.from_numpy(X[i].astype("float32")).to(self.cfg.device)
+            yi = torch.from_numpy(y[i].astype("float32")).to(self.cfg.device)
             if self.temporal_encoding:
-                ti = torch.from_numpy(self.temporal_data[i].astype("float32")).to(
-                    self.cfg.DEVICE
-                )
+                ti = torch.from_numpy(self.temporal_data[i].astype("float32")).to(self.cfg.device)
             else:
                 ti = None
             if self.spatial_encoding:
-                si = torch.from_numpy(self.spatial_data.astype("float32")).to(
-                    self.cfg.DEVICE
-                )
+                si = torch.from_numpy(self.spatial_data.astype("float32")).to(self.cfg.device)
             else:
                 si = None
             g = data.Data(
@@ -261,26 +255,26 @@ class NNDataProcessor:
                 pos=si,
                 time=ti,
             )
-            g = g.to(self.cfg.DEVICE)
+            g = g.to(self.cfg.device)
             dataset.append(g)
 
         train_dataset = dataset[: self.train_size]
         val_dataset = dataset[self.train_size : self.train_size + self.val_size]
         test_dataset = dataset[-self.test_size :]
         # random state for reproduction
-        train_dataset = shuffle(train_dataset, random_state=self.cfg.RANDOM_STATE)
-        val_dataset = shuffle(val_dataset, random_state=self.cfg.RANDOM_STATE)
+        train_dataset = shuffle(train_dataset, random_state=self.cfg.random_state)
+        val_dataset = shuffle(val_dataset, random_state=self.cfg.random_state)
         if test_shuffle:
-            test_dataset = shuffle(test_dataset, random_state=self.cfg.RANDOM_STATE)
+            test_dataset = shuffle(test_dataset, random_state=self.cfg.random_state)
 
         if subset is not None:
-            train_dataset = train_dataset[: subset * self.cfg.BATCH_SIZE]
-            val_dataset = val_dataset[: subset * self.cfg.BATCH_SIZE]
-            test_dataset = test_dataset[: subset * self.cfg.BATCH_SIZE]
+            train_dataset = train_dataset[: subset * self.cfg.batch_size]
+            val_dataset = val_dataset[: subset * self.cfg.batch_size]
+            test_dataset = test_dataset[: subset * self.cfg.batch_size]
 
-        train_loader = DataLoader(train_dataset, batch_size=self.cfg.BATCH_SIZE)
-        val_loader = DataLoader(val_dataset, batch_size=self.cfg.BATCH_SIZE)
-        test_loader = DataLoader(test_dataset, batch_size=self.cfg.BATCH_SIZE)
+        train_loader = DataLoader(train_dataset, batch_size=self.cfg.batch_size)
+        val_loader = DataLoader(val_dataset, batch_size=self.cfg.batch_size)
+        test_loader = DataLoader(test_dataset, batch_size=self.cfg.batch_size)
         return train_loader, val_loader, test_loader
 
     def get_shapes(self):
@@ -298,9 +292,7 @@ class NNDataProcessor:
         Maps latitude-longitude span e.g. (32,48) -> (25,45)
         """
         if flat:
-            batch_size = int(
-                input_tensor.shape[0] / self.num_latitudes / self.num_longitudes
-            )
+            batch_size = int(input_tensor.shape[0] / self.num_latitudes / self.num_longitudes)
             input_tensor = input_tensor.reshape(
                 (
                     batch_size,

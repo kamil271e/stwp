@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
-import cfgrib
-import numpy as np
 import copy
 from datetime import datetime
-from utils.datetime_operations import datetime64_to_datetime, get_day_of_year
-from utils.trig_encode import trig_encode
+
+import cfgrib
+import numpy as np
+from models.config import ModelConfig
 from sklearn.utils import shuffle
-from models.config import config as cfg
-from utils.get_data import BIG_AREA, SMALL_AREA
+from utils.datetime_operations import datetime64_to_datetime, get_day_of_year
+from utils.get_data import SMALL_AREA
+from utils.trig_encode import trig_encode
 
 
 class DataProcessor:
@@ -16,7 +16,7 @@ class DataProcessor:
         spatial_encoding=False,
         temporal_encoding=False,
         additional_encodings=False,
-        path=cfg.DATA_PATH,
+        path=ModelConfig.data_path,
     ):
         self.num_spatial_constants, self.num_temporal_constants = 0, 0
         self.temporal_encoding = temporal_encoding or additional_encodings
@@ -39,7 +39,7 @@ class DataProcessor:
     def upload_data(self, data: np.array):
         self.data = data
 
-    def create_autoregressive_sequences(self, input_size=cfg.INPUT_SIZE, fh=cfg.FH):
+    def create_autoregressive_sequences(self, input_size=ModelConfig.input_size, fh=ModelConfig.fh):
         self.sequence_length = input_size + fh
         sequences = np.empty(
             (
@@ -87,9 +87,7 @@ class DataProcessor:
                 self.longitude,
                 self.neighbours + 1,
                 self.sequence_length,
-                self.num_features
-                + self.num_spatial_constants
-                + self.num_temporal_constants,
+                self.num_features + self.num_spatial_constants + self.num_temporal_constants,
             )
         )
         neigh_data[..., 0, :, :] = self.data
@@ -106,9 +104,7 @@ class DataProcessor:
 
         self.data = neigh_data
 
-    def preprocess(
-        self, input_size=cfg.INPUT_SIZE, fh=cfg.FH, r=cfg.R, use_neighbours=False
-    ):
+    def preprocess(self, input_size=ModelConfig.input_size, fh=ModelConfig.fh, r=ModelConfig.r, use_neighbours=False):
         self.create_autoregressive_sequences(input_size, fh)
         if use_neighbours:
             self.create_neighbours(radius=r)
@@ -118,9 +114,7 @@ class DataProcessor:
         X = self.data[..., :input_size, :]
         return X, y
 
-    def load_data(
-        self, path=cfg.DATA_PATH, spatial_encoding=False, temporal_encoding=False
-    ):
+    def load_data(self, path=ModelConfig.data_path, spatial_encoding=False, temporal_encoding=False):
         grib_data = cfgrib.open_datasets(path)
         surface = grib_data[0]
         hybrid = grib_data[1]
@@ -189,17 +183,11 @@ class DataProcessor:
         return data, feature_list, temporal_data, spatial_data
 
     @staticmethod
-    def train_test_split(
-        X, y, split_ratio=cfg.TRAIN_RATIO, split_type=2, test_shuffle=False
-    ):
-        return DataProcessor.train_val_test_split(
-            X, y, split_ratio, split_type, test_shuffle
-        )
+    def train_test_split(X, y, split_ratio=ModelConfig.train_ration, split_type=2, test_shuffle=False):
+        return DataProcessor.train_val_test_split(X, y, split_ratio, split_type, test_shuffle)
 
     @staticmethod
-    def train_val_test_split(
-        X, y, split_ratio=cfg.TRAIN_RATIO, split_type=1, test_shuffle=False
-    ):
+    def train_val_test_split(X, y, split_ratio=ModelConfig.train_ration, split_type=1, test_shuffle=False):
         """
         split_type=0: X_train (2020), X_val (2021), X_test (2022)
         split_type=1: X_train (2020), X_test (2021)
@@ -220,10 +208,10 @@ class DataProcessor:
                 y[train_samples : 2 * train_samples],
                 y[2 * train_samples :],
             )
-            X_train, y_train = shuffle(X_train, y_train, random_state=cfg.RANDOM_STATE)
-            X_val, y_val = shuffle(X_val, y_val, random_state=cfg.RANDOM_STATE)
+            X_train, y_train = shuffle(X_train, y_train, random_state=ModelConfig.random_state)
+            X_val, y_val = shuffle(X_val, y_val, random_state=ModelConfig.random_state)
             if test_shuffle:
-                X_test, y_test = shuffle(X_test, y_test, random_state=cfg.RANDOM_STATE)
+                X_test, y_test = shuffle(X_test, y_test, random_state=ModelConfig.random_state)
 
             return X_train, X_val, X_test, y_train, y_val, y_test
 
@@ -239,10 +227,10 @@ class DataProcessor:
             X_train, X_test = X[:train_samples], X[train_samples:]
             y_train, y_test = y[:train_samples], y[train_samples:]
 
-        X_train, y_train = shuffle(X_train, y_train, random_state=cfg.RANDOM_STATE)
+        X_train, y_train = shuffle(X_train, y_train, random_state=ModelConfig.random_state)
 
         if test_shuffle:
-            X_test, y_test = shuffle(X_test, y_test, random_state=cfg.RANDOM_STATE)
+            X_test, y_test = shuffle(X_test, y_test, random_state=ModelConfig.random_state)
 
         return X_train, X_test, y_train, y_test
 

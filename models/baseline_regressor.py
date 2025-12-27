@@ -1,29 +1,25 @@
-#!/usr/bin/env python3
-import numpy as np
 import copy
-import cartopy.crs as ccrs
 import os
-import sys
-
-sys.path.append("..")
-from matplotlib import pyplot as plt
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.dummy import DummyRegressor
-from models.data_processor import DataProcessor
-from sklearn.preprocessing import (
-    MinMaxScaler,
-    StandardScaler,
-    MaxAbsScaler,
-    RobustScaler,
-)
-from utils.draw_functions import draw_poland
 from datetime import datetime
+
+import cartopy.crs as ccrs
+import numpy as np
+from matplotlib import pyplot as plt
+from sklearn.dummy import DummyRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.preprocessing import (
+    MaxAbsScaler,
+    MinMaxScaler,
+    RobustScaler,
+    StandardScaler,
+)
+
+from stwp.data.processor import DataProcessor
+from stwp.utils.visualization import draw_poland
 
 
 class BaselineRegressor:
-    def __init__(
-        self, X_shape: tuple, fh: int, feature_list: list, scaler_type="standard"
-    ):
+    def __init__(self, X_shape: tuple, fh: int, feature_list: list, scaler_type="standard"):
         if len(X_shape) > 5:
             (
                 _,
@@ -71,9 +67,7 @@ class BaselineRegressor:
 
         X = X_train.reshape(
             -1,
-            self.neighbours
-            * self.input_state
-            * (self.num_features + self.num_spatial_constants),
+            self.neighbours * self.input_state * (self.num_features + self.num_spatial_constants),
         )
         for i in range(self.num_features):
             yi = y_train[..., 0, i].reshape(-1, 1)
@@ -139,13 +133,9 @@ class BaselineRegressor:
                 cur_feature = self.feature_list[j]
                 y_test_sample_feature_j = y_test_sample[..., j].reshape(-1, 1)
                 y_hat_sample_feature_j = y_hat_sample[..., j].reshape(-1, 1)
-                mse = mean_squared_error(
-                    y_test_sample_feature_j, y_hat_sample_feature_j
-                )
+                mse = mean_squared_error(y_test_sample_feature_j, y_hat_sample_feature_j)
                 rmse = np.sqrt(mse)
-                mae = mean_absolute_error(
-                    y_test_sample_feature_j, y_hat_sample_feature_j
-                )
+                mae = mean_absolute_error(y_test_sample_feature_j, y_hat_sample_feature_j)
                 std = np.std(y_test_sample_feature_j)
                 sqrt_n = np.sqrt(y_test_sample_feature_j.shape[0])
                 print(f"{cur_feature} => RMSE:  {rmse}; MAE: {mae}; SE: {std / sqrt_n}")
@@ -155,15 +145,15 @@ class BaselineRegressor:
                     if pretty:
                         ax = axs[j, k]
                     if k % 3 == 0:
-                        title = rf"$Y^{{t+{ts+1}}}_{{{cur_feature}}}$"
+                        title = rf"$Y^{{t+{ts + 1}}}_{{{cur_feature}}}$"
                         value = y_test[i, ..., ts, j]
                         cmap = plt.cm.coolwarm
                     elif k % 3 == 1:
-                        title = rf"$\hat{{Y}}^{{t+{ts+1}}}_{{{cur_feature}}}$"
+                        title = rf"$\hat{{Y}}^{{t+{ts + 1}}}_{{{cur_feature}}}$"
                         value = y_hat[i, ..., ts, j]
                         cmap = plt.cm.coolwarm
                     else:
-                        title = rf"$|Y - \hat{{Y}}|^{{t+{ts+1}}}_{{{cur_feature}}}$"
+                        title = rf"$|Y - \hat{{Y}}|^{{t+{ts + 1}}}_{{{cur_feature}}}$"
                         value = np.abs(y_test[i, ..., ts, j] - y_hat[i, ..., ts, j])
                         cmap = "binary"
 
@@ -187,17 +177,13 @@ class BaselineRegressor:
 
         X = X_test.reshape(
             -1,
-            self.neighbours
-            * self.input_state
-            * (self.num_features + self.num_spatial_constants),
+            self.neighbours * self.input_state * (self.num_features + self.num_spatial_constants),
         )
         if self.fh == 1:
             y_hat = []
             for i in range(self.num_features):
                 y_hat_i = (
-                    self.models[i]
-                    .predict(X)
-                    .reshape(-1, self.latitude, self.longitude, self.fh)
+                    self.models[i].predict(X).reshape(-1, self.latitude, self.longitude, self.fh)
                 )
                 y_hat.append(y_hat_i)
             y_hat = np.array(y_hat).transpose((1, 2, 3, 4, 0))
@@ -218,7 +204,7 @@ class BaselineRegressor:
         sqrt_n = np.sqrt(y_test.shape[0] * self.latitude * self.longitude * self.fh)
         for i in range(self.num_features):
             print(
-                f"{self.feature_list[i]} => RMSE: {rmse_scores[i]};  MAE: {mae_scores[i]}; SE: {np.std(y_test[...,i]) / sqrt_n}"
+                f"{self.feature_list[i]} => RMSE: {rmse_scores[i]};  MAE: {mae_scores[i]}; SE: {np.std(y_test[..., i]) / sqrt_n}"
             )
 
         return y_hat
@@ -301,9 +287,7 @@ class BaselineRegressor:
             radius = 3
 
         _, indices = DataProcessor.count_neighbours(radius=radius)
-        Y_out = np.empty(
-            (self.latitude, self.longitude, self.neighbours, self.num_features)
-        )
+        Y_out = np.empty((self.latitude, self.longitude, self.neighbours, self.num_features))
         Y_out[..., 0, :] = Y
         for n in range(1, self.neighbours):
             i, j = indices[n - 1]

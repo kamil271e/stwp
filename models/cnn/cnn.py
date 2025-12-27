@@ -1,6 +1,6 @@
-from torch import nn, cat
+from models.config import ModelConfig
+from torch import cat, nn
 from torch.nn.functional import relu
-from models.config import config as cfg
 
 
 class UNet(nn.Module):
@@ -16,7 +16,7 @@ class UNet(nn.Module):
     ):
         super().__init__()
         BASE = base_units
-        self.lat, self.lon = cfg.INPUT_DIMS
+        self.lat, self.lon = ModelConfig.input_dims
         self.features = features
         self.mlp_embedder = nn.Linear(s * features, BASE)
         self.temporal_embedder = nn.Linear(temporal_features, self.lat * self.lon)
@@ -26,33 +26,19 @@ class UNet(nn.Module):
         self.enc11 = nn.Conv2d(
             enc11_input_size, BASE, kernel_size=3, padding=1, padding_mode="reflect"
         )
-        self.enc12 = nn.Conv2d(
-            BASE, BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.enc12 = nn.Conv2d(BASE, BASE, kernel_size=3, padding=1, padding_mode="reflect")
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.enc21 = nn.Conv2d(
-            BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
-        self.enc22 = nn.Conv2d(
-            2 * BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.enc21 = nn.Conv2d(BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
+        self.enc22 = nn.Conv2d(2 * BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.enc31 = nn.Conv2d(
-            2 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
-        self.enc32 = nn.Conv2d(
-            4 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.enc31 = nn.Conv2d(2 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
+        self.enc32 = nn.Conv2d(4 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
         self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.enc41 = nn.Conv2d(
-            4 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
-        self.enc42 = nn.Conv2d(
-            8 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.enc41 = nn.Conv2d(4 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
+        self.enc42 = nn.Conv2d(8 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
         self.pool4 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.enc51 = nn.Conv2d(
@@ -67,33 +53,19 @@ class UNet(nn.Module):
         self.dec01 = nn.Conv2d(
             16 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
         )
-        self.dec02 = nn.Conv2d(
-            8 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.dec02 = nn.Conv2d(8 * BASE, 8 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
 
         self.upconv1 = nn.ConvTranspose2d(8 * BASE, 4 * BASE, kernel_size=2, stride=2)
-        self.dec11 = nn.Conv2d(
-            8 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
-        self.dec12 = nn.Conv2d(
-            4 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.dec11 = nn.Conv2d(8 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
+        self.dec12 = nn.Conv2d(4 * BASE, 4 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
 
         self.upconv2 = nn.ConvTranspose2d(4 * BASE, 2 * BASE, kernel_size=2, stride=2)
-        self.dec21 = nn.Conv2d(
-            4 * BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
-        self.dec22 = nn.Conv2d(
-            2 * BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.dec21 = nn.Conv2d(4 * BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
+        self.dec22 = nn.Conv2d(2 * BASE, 2 * BASE, kernel_size=3, padding=1, padding_mode="reflect")
 
         self.upconv3 = nn.ConvTranspose2d(2 * BASE, BASE, kernel_size=2, stride=2)
-        self.dec31 = nn.Conv2d(
-            2 * BASE, BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
-        self.dec32 = nn.Conv2d(
-            BASE, BASE, kernel_size=3, padding=1, padding_mode="reflect"
-        )
+        self.dec31 = nn.Conv2d(2 * BASE, BASE, kernel_size=3, padding=1, padding_mode="reflect")
+        self.dec32 = nn.Conv2d(BASE, BASE, kernel_size=3, padding=1, padding_mode="reflect")
 
         # Output
         self.outconv = nn.Conv2d(BASE, fh * out_features, kernel_size=1)
@@ -106,11 +78,7 @@ class UNet(nn.Module):
         # Embed features
         Xe = relu(self.mlp_embedder(x))
         # print(f"X embedding: {Xe.shape}")
-        te = (
-            self.temporal_embedder(t.reshape(batch_size, 1, -1))
-            .relu()
-            .permute((0, 2, 1))
-        )
+        te = self.temporal_embedder(t.reshape(batch_size, 1, -1)).relu().permute((0, 2, 1))
         # print(f"t embeding: {te.shape}")
         concat = cat((Xe, te, s), dim=-1)
         # print(f"Concat before reshape: {concat.shape}")

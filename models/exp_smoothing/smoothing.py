@@ -1,13 +1,10 @@
-#!/usr/bin/env python3
 import numpy as np
-from statsmodels.tsa.api import SimpleExpSmoothing, Holt
 from models.baseline_regressor import BaselineRegressor
+from statsmodels.tsa.api import SimpleExpSmoothing
 
 
 class SmoothingPredictor(BaselineRegressor):
-    def __init__(
-        self, X_shape: tuple, fh: int, feature_list: list, smoothing_type="simple"
-    ):
+    def __init__(self, X_shape: tuple, fh: int, feature_list: list, smoothing_type="simple"):
         super().__init__(X_shape, fh, feature_list)
         if smoothing_type == "simple":
             self.type = smoothing_type
@@ -28,9 +25,7 @@ class SmoothingPredictor(BaselineRegressor):
         return
 
     def predict_(self, X_test, y_test):
-        X = X_test.reshape(
-            -1, self.latitude, self.longitude, self.input_state, self.num_features
-        )
+        X = X_test.reshape(-1, self.latitude, self.longitude, self.input_state, self.num_features)
         y_hat = []
         for i in range(X.shape[0]):
             y_hat_i = []
@@ -73,9 +68,7 @@ class SmoothingPredictor(BaselineRegressor):
             y_hat.append(y_hat_i)
         y_hat = (
             np.array(y_hat)
-            .reshape(
-                (X.shape[0], self.num_features, self.latitude, self.longitude, self.fh)
-            )
+            .reshape((X.shape[0], self.num_features, self.latitude, self.longitude, self.fh))
             .transpose((0, 2, 3, 4, 1))
         )
         return y_hat

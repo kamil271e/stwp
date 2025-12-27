@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 import copy
+
 import numpy as np
-from models.data_processor import DataProcessor
 from models.baseline_regressor import BaselineRegressor
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from models.data_processor import DataProcessor
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 
 
 class SimpleLinearRegressor(BaselineRegressor):
@@ -50,9 +50,7 @@ class SimpleLinearRegressor(BaselineRegressor):
             for i in range(self.num_features):
                 Xi = X_test[..., i].reshape(-1, self.neighbours * self.input_state)
                 y_hat_i = (
-                    self.models[i]
-                    .predict(Xi)
-                    .reshape(-1, self.latitude, self.longitude, self.fh)
+                    self.models[i].predict(Xi).reshape(-1, self.latitude, self.longitude, self.fh)
                 )
                 y_hat.append(y_hat_i)
             y_hat = np.array(y_hat).transpose((1, 2, 3, 4, 0))
@@ -68,9 +66,7 @@ class SimpleLinearRegressor(BaselineRegressor):
                 y_hat_ij = np.zeros(y_test[i].shape[:-1])
                 Xij = X_test[i, ..., j].reshape(-1, self.neighbours * self.input_state)
                 y_hat_ij[..., 0] = (
-                    self.models[j]
-                    .predict(Xij)
-                    .reshape(1, self.latitude, self.longitude)
+                    self.models[j].predict(Xij).reshape(1, self.latitude, self.longitude)
                 )
                 for k in range(self.fh - 1):
                     if self.fh - self.input_state < 2:
@@ -96,9 +92,7 @@ class SimpleLinearRegressor(BaselineRegressor):
                         )
                     Xij = Xij.reshape(-1, self.neighbours * self.input_state)
                     y_hat_ij[..., k + 1] = (
-                        self.models[j]
-                        .predict(Xij)
-                        .reshape(1, self.latitude, self.longitude)
+                        self.models[j].predict(Xij).reshape(1, self.latitude, self.longitude)
                     )
                 y_hat[i, ..., j] = y_hat_ij
         return y_hat

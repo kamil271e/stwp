@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
 import copy
-from xgboost import XGBRegressor
+
 from catboost import CatBoostRegressor
-from sklearn.ensemble import AdaBoostRegressor
 from lightgbm import LGBMRegressor
 from models.baseline_regressor import BaselineRegressor
+from sklearn.ensemble import AdaBoostRegressor
+from xgboost import XGBRegressor
 
 
 class GradBooster(BaselineRegressor):
-    def __init__(
-        self, X_shape, fh, feature_list, booster="lgb", scaler_type="standard", **kwargs
-    ):
+    def __init__(self, X_shape, fh, feature_list, booster="lgb", scaler_type="standard", **kwargs):
         super().__init__(X_shape, fh, feature_list, scaler_type=scaler_type)
         if booster == "lgb":
             self.model = LGBMRegressor(verbose=-1, n_jobs=-1, **kwargs)

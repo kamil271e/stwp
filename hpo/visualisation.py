@@ -1,16 +1,15 @@
-import sys
 import json
-import matplotlib.pyplot as plt
-from tabulate import tabulate
-import numpy as np
-import cartopy.crs as ccrs
-from utils.draw_functions import draw_poland
-from models.data_processor import DataProcessor
 import os
 
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
+import numpy as np
+from tabulate import tabulate
+
+from stwp.data.processor import DataProcessor
+from stwp.utils.visualization import draw_poland
 
 plt.style.use("ggplot")
-sys.path.append("..")
 
 
 class Visualization:
@@ -38,7 +37,7 @@ class Visualization:
 
     def read_plots_from_json(self, file_name="modelsplots.json"):
         try:
-            with open(file_name, "r") as infile:
+            with open(file_name) as infile:
                 self.plots_data = json.load(infile)
 
         except FileNotFoundError:
@@ -49,7 +48,7 @@ class Visualization:
         table = []
 
         # Iterate over each baseline_type and create a row in the table
-        for baseline_type in self.plots_data.keys():
+        for baseline_type in self.plots_data:
             # Get the metrics for the current baseline_type
             metrics = self.plots_data[baseline_type]["metrics"]
 
@@ -66,7 +65,7 @@ class Visualization:
         table = []
 
         # Iterate over each baseline_type and create a row in the table
-        for baseline_type in self.plots_data.keys():
+        for baseline_type in self.plots_data:
             # Get the metrics for the current baseline_type
             metrics = self.plots_data[baseline_type]["metrics_for_scalers"]
 
@@ -78,12 +77,10 @@ class Visualization:
 
         return table
 
-    def plot_not_normalized_data_sequence(
-        self, for_features=False, one_plot=False, save=None
-    ):
-        if for_features == False:
+    def plot_not_normalized_data_sequence(self, for_features=False, one_plot=False, save=None):
+        if not for_features:
             # Iterate over each baseline_type and plot the data
-            for i, baseline_type in enumerate(self.plots_data.keys()):
+            for baseline_type in self.plots_data:
                 # Check if the baseline_type has the "not_normalized_plot_sequence" field
                 if "not_normalized_plot_sequence" in self.plots_data[baseline_type]:
                     # Create a new plot for each baseline_type
@@ -117,12 +114,10 @@ class Visualization:
                     # Show the plot for each baseline_type
                 plt.show()
 
-        elif one_plot == True and for_features == True:
+        elif one_plot and for_features:
             num_plots = len(self.plots_data)
             num_cols = 2  # Number of columns in the grid
-            num_rows = (
-                num_plots + num_cols - 1
-            ) // num_cols  # Number of rows in the grid
+            num_rows = (num_plots + num_cols - 1) // num_cols  # Number of rows in the grid
             fig, axes = plt.subplots(num_rows, num_cols, figsize=(12, 18))
             # initialize data structures
             baselines = []
@@ -144,7 +139,7 @@ class Visualization:
                     ]
 
                     for i, feature in enumerate(self.feature_list):
-                        for key in not_normalized_plot_sequence.keys():
+                        for key in not_normalized_plot_sequence:
                             for_feature_dict[feature].append(
                                 list(not_normalized_plot_sequence[key])[i]
                             )
@@ -169,9 +164,7 @@ class Visualization:
                             "-o",
                             color=self.colors[baselines[i]],
                         )
-                        axes[row, col].set_title(
-                            f"Input Sequence Length - {feature}", fontsize=10
-                        )
+                        axes[row, col].set_title(f"Input Sequence Length - {feature}", fontsize=10)
                         axes[row, col].legend(legend, fontsize=8)
                         axes[row, col].set_xlabel("Sequence Length", fontsize=8)
                         axes[row, col].set_ylabel(r"$\mathcal{L}_{RMSE}$", fontsize=8)
@@ -201,7 +194,7 @@ class Visualization:
                     ]
 
                     for i, feature in enumerate(self.feature_list):
-                        for key in not_normalized_plot_sequence.keys():
+                        for key in not_normalized_plot_sequence:
                             for_feature_dict[feature].append(
                                 list(not_normalized_plot_sequence[key])[i]
                             )
@@ -213,9 +206,7 @@ class Visualization:
             for feature in self.feature_list:
                 fig, ax = plt.subplots(figsize=(10, 8))
                 for i in range(len(baselines)):
-                    ax.plot(
-                        list(not_normalized_plot_sequence.keys()), plot_dict[feature][i]
-                    )
+                    ax.plot(list(not_normalized_plot_sequence.keys()), plot_dict[feature][i])
                     ax.set_title(f"Input Sequence Length - {feature}")
                 ax.legend(baselines)
                 ax.set_xlabel("Sequence Length")
@@ -225,12 +216,10 @@ class Visualization:
                     plt.savefig(f"{feature}_{save}.pdf", bbox_inches="tight")
                 plt.show()
 
-    def plot_not_normalized_data_fh(
-        self, for_features=False, one_plot=False, save=None
-    ):
-        if for_features == False:
+    def plot_not_normalized_data_fh(self, for_features=False, one_plot=False, save=None):
+        if not for_features:
             # Iterate over each baseline_type and plot the data
-            for i, baseline_type in enumerate(self.plots_data.keys()):
+            for baseline_type in self.plots_data:
                 # Check if the baseline_type has the "not_normalized_plot_sequence" field
                 if "not_normalized_plot_fh" in self.plots_data[baseline_type]:
                     # Create a new plot for each baseline_type
@@ -259,12 +248,10 @@ class Visualization:
                     plt.savefig(f"{baseline_type}_{save}.pdf", bbox_inches="tight")
                 plt.show()
 
-        elif one_plot == True and for_features == True:
+        elif one_plot and for_features:
             num_plots = len(self.plots_data)
             num_cols = 2  # Number of columns in the grid
-            num_rows = (
-                num_plots + num_cols - 1
-            ) // num_cols  # Number of rows in the grid
+            num_rows = (num_plots + num_cols - 1) // num_cols  # Number of rows in the grid
             fig, axes = plt.subplots(num_rows, num_cols, figsize=(12, 18))
             # initialize data structures
             baselines = []
@@ -285,7 +272,7 @@ class Visualization:
                         "not_normalized_plot_fh"
                     ]
                     for i, feature in enumerate(self.feature_list):
-                        for key in not_normalized_plot_sequence.keys():
+                        for key in not_normalized_plot_sequence:
                             # print(baseline_type)
                             for_feature_dict[feature].append(
                                 list(not_normalized_plot_sequence[key])[i]
@@ -313,13 +300,9 @@ class Visualization:
                             "-o",
                             color=self.colors[baselines[i]],
                         )
-                        axes[row, col].set_title(
-                            f"Predicted Steps - {feature}", fontsize=10
-                        )
+                        axes[row, col].set_title(f"Predicted Steps - {feature}", fontsize=10)
                         axes[row, col].legend(legend, fontsize=8)
-                        axes[row, col].set_xlabel(
-                            "Number of Predicted Steps", fontsize=8
-                        )
+                        axes[row, col].set_xlabel("Number of Predicted Steps", fontsize=8)
                         axes[row, col].set_ylabel(r"$\mathcal{L}_{RMSE}$", fontsize=8)
 
             if save is not None:
@@ -348,7 +331,7 @@ class Visualization:
                     ]
 
                     for i, feature in enumerate(self.feature_list):
-                        for key in not_normalized_plot_sequence.keys():
+                        for key in not_normalized_plot_sequence:
                             for_feature_dict[feature].append(
                                 list(not_normalized_plot_sequence[key])[i]
                             )
@@ -360,9 +343,7 @@ class Visualization:
             for feature in self.feature_list:
                 fig, ax = plt.subplots(figsize=(10, 8))
                 for i in range(len(baselines)):
-                    ax.plot(
-                        list(not_normalized_plot_sequence.keys()), plot_dict[feature][i]
-                    )
+                    ax.plot(list(not_normalized_plot_sequence.keys()), plot_dict[feature][i])
                     ax.set_title(f"Predicted Steps - {feature}")
                 ax.legend(baselines)
                 ax.set_xlabel("Number of Predicted Steps")
@@ -378,7 +359,7 @@ class Visualization:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 # Get the sequence_plot_x and sequence_plot_y for the current baseline_type
                 sequence_plot_x = self.plots_data[baseline_type]["sequence_plot_x"]
                 sequence_plot_y = self.plots_data[baseline_type]["sequence_plot_y"]
@@ -408,9 +389,7 @@ class Visualization:
             # Create a grid of subplots
             num_plots = len(self.plots_data)
             num_cols = 2  # Number of columns in the grid
-            num_rows = (
-                num_plots + num_cols - 1
-            ) // num_cols  # Number of rows in the grid
+            num_rows = (num_plots + num_cols - 1) // num_cols  # Number of rows in the grid
             fig, axes = plt.subplots(num_rows, num_cols, figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
@@ -451,13 +430,11 @@ class Visualization:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 if baseline_type in ["simple-linear", "linear", "lgbm"]:
                     # Get the sequence_plot_x and sequence_plot_time for the current baseline_type
                     sequence_plot_x = self.plots_data[baseline_type]["sequence_plot_x"]
-                    sequence_plot_time = self.plots_data[baseline_type][
-                        "sequence_plot_time"
-                    ]
+                    sequence_plot_time = self.plots_data[baseline_type]["sequence_plot_time"]
 
                     # Plot the data on the single plot
                     ax.plot(
@@ -484,13 +461,11 @@ class Visualization:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 if baseline_type in ["gnn", "cnn"]:
                     # Get the sequence_plot_x and sequence_plot_time for the current baseline_type
                     sequence_plot_x = self.plots_data[baseline_type]["sequence_plot_x"]
-                    sequence_plot_time = self.plots_data[baseline_type][
-                        "sequence_plot_time"
-                    ]
+                    sequence_plot_time = self.plots_data[baseline_type]["sequence_plot_time"]
 
                     # Plot the data on the single plot
                     ax.plot(
@@ -517,18 +492,14 @@ class Visualization:
             # Create a grid of subplots
             num_plots = len(self.plots_data)
             num_cols = 2  # Number of columns in the grid
-            num_rows = (
-                num_plots + num_cols - 1
-            ) // num_cols  # Number of rows in the grid
+            num_rows = (num_plots + num_cols - 1) // num_cols  # Number of rows in the grid
             fig, axes = plt.subplots(num_rows, num_cols, figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
             for i, baseline_type in enumerate(self.plots_data.keys()):
                 # Get the sequence_plot_x and sequence_plot_time for the current baseline_type
                 sequence_plot_x = self.plots_data[baseline_type]["sequence_plot_x"]
-                sequence_plot_time = self.plots_data[baseline_type][
-                    "sequence_plot_time"
-                ]
+                sequence_plot_time = self.plots_data[baseline_type]["sequence_plot_time"]
 
                 # Determine the subplot position based on the current index
                 row = i // num_cols
@@ -562,7 +533,7 @@ class Visualization:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 # Get the fh_plot_x and fh_plot_y for the current baseline_type
                 fh_plot_x = self.plots_data[baseline_type]["fh_plot_x"]
                 fh_plot_y = self.plots_data[baseline_type]["fh_plot_y"]
@@ -592,9 +563,7 @@ class Visualization:
             # Create a grid of subplots
             num_plots = len(self.plots_data)
             num_cols = 2  # Number of columns in the grid
-            num_rows = (
-                num_plots + num_cols - 1
-            ) // num_cols  # Number of rows in the grid
+            num_rows = (num_plots + num_cols - 1) // num_cols  # Number of rows in the grid
             fig, axes = plt.subplots(num_rows, num_cols, figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
@@ -608,9 +577,7 @@ class Visualization:
                 col = i % num_cols
 
                 # Plot the data on the current subplot
-                axes[row, col].plot(
-                    fh_plot_x, fh_plot_y, "-o", color=self.colors[baseline_type]
-                )
+                axes[row, col].plot(fh_plot_x, fh_plot_y, "-o", color=self.colors[baseline_type])
                 axes[row, col].set_title(
                     self.baseline_dict[baseline_type]
                 )  # Set the title as the baseline_type
@@ -644,14 +611,11 @@ class Visualization:
         if one_plot:
             # Create a single plot with multiple bars and legend
             fig, ax = plt.subplots(figsize=(20, 8))  # Adjust the width of the plot
-            n = 12
             width = 0.15  # Adjust the width of each bar
             i = 0
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 month_plot_x = list(range(1, 13))
-                month_plot_y = list(
-                    self.plots_data[baseline_type]["month_error"].values()
-                )
+                month_plot_y = list(self.plots_data[baseline_type]["month_error"].values())
                 ind = np.arange(max(month_plot_x))
                 if len(month_plot_y) == 12:
                     ax.bar(
@@ -664,18 +628,14 @@ class Visualization:
                     i += 1
 
             # Set the title and legend
-            plt.xticks(
-                ind + width * (i - 1) / 2, months
-            )  # Adjust the position of x-ticks
+            plt.xticks(ind + width * (i - 1) / 2, months)  # Adjust the position of x-ticks
             ax.set_title("Monthly errors")
             ax.legend()
             ax.set_xlabel("Months")
             ax.set_ylabel(r"$\tilde{\mathcal{L}}_{RMSE}$")
 
             # Show the plot
-            plt.xticks(
-                ind + width * (i - 1) / 2, months
-            )  # Adjust the position of x-ticks
+            plt.xticks(ind + width * (i - 1) / 2, months)  # Adjust the position of x-ticks
 
             if save is not None:
                 plt.savefig(f"{save}.pdf", bbox_inches="tight")
@@ -687,7 +647,7 @@ class Visualization:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 if baseline_type in ["simple-linear", "linear", "lgbm"]:
                     # Get the fh_plot_x and fh_plot_time for the current baseline_type
                     fh_plot_x = self.plots_data[baseline_type]["fh_plot_x"]
@@ -715,7 +675,7 @@ class Visualization:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
-            for baseline_type in self.plots_data.keys():
+            for baseline_type in self.plots_data:
                 if baseline_type in ["gnn", "cnn"]:
                     # Get the fh_plot_x and fh_plot_time for the current baseline_type
                     fh_plot_x = self.plots_data[baseline_type]["fh_plot_x"]
@@ -746,9 +706,7 @@ class Visualization:
             # Create a grid of subplots
             num_plots = len(self.plots_data)
             num_cols = 2  # Number of columns in the grid
-            num_rows = (
-                num_plots + num_cols - 1
-            ) // num_cols  # Number of rows in the grid
+            num_rows = (num_plots + num_cols - 1) // num_cols  # Number of rows in the grid
             fig, axes = plt.subplots(num_rows, num_cols, figsize=(10, 8))
 
             # Iterate over each baseline_type and plot the data
@@ -762,9 +720,7 @@ class Visualization:
                 col = i % num_cols
 
                 # Plot the data on the current subplot
-                axes[row, col].plot(
-                    fh_plot_x, fh_plot_time, "-o", color=self.colors[baseline_type]
-                )
+                axes[row, col].plot(fh_plot_x, fh_plot_time, "-o", color=self.colors[baseline_type])
                 axes[row, col].set_title(
                     self.baseline_dict[baseline_type]
                 )  # Set the title as the baseline_type
@@ -782,7 +738,7 @@ class Visualization:
         fig, ax = plt.subplots(figsize=(10, 8))
 
         # Iterate over each baseline_type and plot the data
-        for baseline_type in self.plots_data.keys():
+        for baseline_type in self.plots_data:
             if baseline_type == "gnn":
                 alpha_plot_x = self.plots_data[baseline_type]["gnn_alpha_plot_x"]
                 alpha_plot_y = self.plots_data[baseline_type]["gnn_alpha_plot_y"]
@@ -813,7 +769,7 @@ class Visualization:
         fig, ax = plt.subplots(figsize=(10, 8))
 
         # Iterate over each baseline_type and plot the data
-        for baseline_type in self.plots_data.keys():
+        for baseline_type in self.plots_data:
             if baseline_type == "gnn":
                 cell_plot_x = self.plots_data[baseline_type]["gnn_cell_plot_x"]
                 cell_plot_y = self.plots_data[baseline_type]["gnn_cell_plot_y"]
@@ -840,7 +796,7 @@ class Visualization:
         plt.show()
 
     def plot_error_maps(self):
-        for baseline_type in self.plots_data.keys():
+        for baseline_type in self.plots_data:
             if os.path.exists(f"./{baseline_type}/error_maps.npy"):
                 error_maps = np.load(f"./{baseline_type}/error_maps.npy")
 
@@ -863,6 +819,4 @@ class Visualization:
                     value = error_maps[j]
                     cmap = "binary"
                     draw_poland(ax, value, title, cmap, **spatial)
-                fig.suptitle(
-                    f"{baseline_type} error maps", x=0.7, y=0.95, weight="bold"
-                )
+                fig.suptitle(f"{baseline_type} error maps", x=0.7, y=0.95, weight="bold")

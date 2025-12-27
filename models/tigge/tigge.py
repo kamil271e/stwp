@@ -1,10 +1,9 @@
-import cfgrib
-import numpy as np
-import sys
 from datetime import datetime
 
-sys.path.append("../..")
-from models.baseline_regressor import BaselineRegressor
+import cfgrib
+import numpy as np
+
+from stwp.models.base import BaselineRegressor
 
 
 def step_split(feature, n_steps=3):

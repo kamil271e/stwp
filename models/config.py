@@ -1,20 +1,19 @@
 import torch
+from dataclasses import dataclass
 
+@dataclass
+class ModelConfig:
+    """Model onfiguration with static class attributes."""
 
-class Config:
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    TRAIN_RATIO = 1 / 3
-    BATCH_SIZE = 8
-    FH = 1
-    # AUTOREG_FH = None
-    INPUT_SIZE = 5
-    R = 2
-    GRAPH_CELLS = 9
-    SCALER_TYPE = "standard"
-    DATA_PATH = "../../data2019-2021_BIG.grib"
-    RANDOM_STATE = 42
-    INPUT_DIMS = (32, 48)
-    OUTPUT_DIMS = (25, 45)
-
-
-config = Config()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_ration = 1 / 3
+    batch_size = 8
+    fh = 1
+    input_size = 5
+    r = 2
+    graph_cells = 9
+    scaler_type = "standard"
+    data_path = "../../data2019-2021_BIG.grib"
+    random_state = 42
+    input_dims = (32, 48)
+    output_dims = (25, 45)

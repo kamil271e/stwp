@@ -1,23 +1,23 @@
+import json
+import time
+from datetime import datetime, timedelta
+
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
-import time
-import cartopy.crs as ccrs
-import json
-
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from models.gnn.processor import NNDataProcessor
+from models.config import ModelConfig
 from models.data_processor import DataProcessor
-from models.config import config as cfg
 from models.gnn.callbacks import (
-    LRAdjustCallback,
     CkptCallback,
     EarlyStoppingCallback,
+    LRAdjustCallback,
 )
 from models.gnn.gnn_module import GNNModule
+from models.gnn.processor import NNDataProcessor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 from utils.draw_functions import draw_poland
 from utils.trig_encode import trig_decode
-from datetime import datetime, timedelta
 
 
 class Trainer:
@@ -48,7 +48,7 @@ class Trainer:
         self.spatial_mapping = spatial_mapping
         self.subset = subset
 
-        self.cfg = cfg
+        self.cfg = ModelConfig
         self.nn_proc = NNDataProcessor(
             additional_encodings=additional_encodings, test_shuffle=test_shuffle
         )
@@ -68,8 +68,8 @@ class Trainer:
         self.early_stop_callback = None
         self.init_train_details()
 
-    def update_config(self, c):
-        self.cfg = c
+    def update_config(self, cfg):
+        self.cfg = cfg
         self.init_architecture()
         self.update_data_process()
         self.init_train_details()
@@ -82,9 +82,7 @@ class Trainer:
         self.feature_list = self.nn_proc.feature_list
         self.features = len(self.feature_list)
         (_, self.latitude, self.longitude, self.features) = self.nn_proc.get_shapes()
-        self.constants = (
-            self.nn_proc.num_spatial_constants + self.nn_proc.num_temporal_constants
-        )
+        self.constants = self.nn_proc.num_spatial_constants + self.nn_proc.num_temporal_constants
         self.edge_index = self.nn_proc.edge_index
         self.edge_weights = self.nn_proc.edge_weights
         self.edge_attr = self.nn_proc.edge_attr
@@ -109,16 +107,14 @@ class Trainer:
             "hidden_dim": self.hidden_dim,
             "input_t_dim": self.nn_proc.num_temporal_constants,
             "input_s_dim": self.nn_proc.num_spatial_constants,
-            "input_size": self.cfg.INPUT_SIZE,
-            "fh": self.cfg.FH,
-            "num_graph_cells": self.cfg.GRAPH_CELLS,
+            "input_size": self.cfg.input_size,
+            "fh": self.cfg.fh,
+            "num_graph_cells": self.cfg.graph_cells,
         }
-        self.model = GNNModule(**init_dict).to(self.cfg.DEVICE)
+        self.model = GNNModule(**init_dict).to(self.cfg.device)
 
     def init_train_details(self):
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.lr, weight_decay=1e-4
-        )
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
         self.lr_callback = LRAdjustCallback(self.optimizer, gamma=self.gamma)
         self.ckpt_callback = CkptCallback(self.model)
         self.early_stop_callback = EarlyStoppingCallback()
@@ -153,14 +149,12 @@ class Trainer:
 
                 total_loss += loss.item()
 
-            avg_loss = total_loss / (self.subset * self.cfg.BATCH_SIZE)
+            avg_loss = total_loss / (self.subset * self.cfg.batch_size)
             train_loss_list.append(avg_loss)
             last_lr = self.optimizer.param_groups[0]["lr"]
 
             if verbose:
-                print(
-                    f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_loss:.5f}, lr: {last_lr}"
-                )
+                print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_loss:.5f}, lr: {last_lr}")
 
             self.model.eval()
             with torch.no_grad():
@@ -182,9 +176,7 @@ class Trainer:
                     loss = self.criterion(y_hat, batch_y)
                     val_loss += loss.item()
 
-            avg_val_loss = val_loss / (
-                min(self.subset, self.val_size) * self.cfg.BATCH_SIZE
-            )
+            avg_val_loss = val_loss / (min(self.subset, self.val_size) * self.cfg.batch_size)
             val_loss_list.append(avg_val_loss)
 
             if verbose:
@@ -212,27 +204,23 @@ class Trainer:
         plt.show()
 
     def predict(self, X, y, edge_index, edge_attr, s, t, inverse_norm=True):
-        y = y.reshape((-1, self.latitude, self.longitude, self.features, self.cfg.FH))
+        y = y.reshape((-1, self.latitude, self.longitude, self.features, self.cfg.fh))
         y_hat = self.model(X, edge_index, edge_attr, t, s).reshape(
-            (-1, self.latitude, self.longitude, self.features, self.cfg.FH)
+            (-1, self.latitude, self.longitude, self.features, self.cfg.fh)
         )
 
         y = y.cpu().detach().numpy()
         y_hat = y_hat.cpu().detach().numpy()
 
         if inverse_norm:
-            y_shape = (self.latitude, self.longitude, self.cfg.FH)
+            y_shape = (self.latitude, self.longitude, self.cfg.fh)
             for i in range(self.features):
                 for j in range(y_hat.shape[0]):
                     yi = y[j, ..., i, :].copy().reshape(-1, 1)
                     yhat_i = y_hat[j, ..., i, :].copy().reshape(-1, 1)
 
-                    y[j, ..., i, :] = (
-                        self.scalers[i].inverse_transform(yi).reshape(y_shape)
-                    )
-                    y_hat[j, ..., i, :] = (
-                        self.scalers[i].inverse_transform(yhat_i).reshape(y_shape)
-                    )
+                    y[j, ..., i, :] = self.scalers[i].inverse_transform(yi).reshape(y_shape)
+                    y_hat[j, ..., i, :] = self.scalers[i].inverse_transform(yhat_i).reshape(y_shape)
         if inverse_norm:
             y_hat = self.clip_total_cloud_cover(y_hat)
         return y, y_hat
@@ -257,9 +245,7 @@ class Trainer:
             }
 
         X, y = sample.x, sample.y
-        y, y_hat = self.predict(
-            X, y, sample.edge_index, sample.edge_attr, sample.pos, sample.time
-        )
+        y, y_hat = self.predict(X, y, sample.edge_index, sample.edge_attr, sample.pos, sample.time)
         latitude, longitude = self.latitude, self.longitude
 
         if self.spatial_mapping:
@@ -267,45 +253,43 @@ class Trainer:
             y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
             latitude, longitude = y_hat.shape[1:3]
 
-        for i in range(self.cfg.BATCH_SIZE):
+        for i in range(self.cfg.batch_size):
             if pretty:
                 fig, axs = plt.subplots(
                     self.features,
-                    3 * self.cfg.FH,
-                    figsize=(10 * self.cfg.FH, 3 * self.features),
+                    3 * self.cfg.fh,
+                    figsize=(10 * self.cfg.fh, 3 * self.features),
                     subplot_kw={"projection": ccrs.Mercator(central_longitude=40)},
                 )
             else:
                 fig, ax = plt.subplots(
                     self.features,
-                    3 * self.cfg.FH,
-                    figsize=(10 * self.cfg.FH, 3 * self.features),
+                    3 * self.cfg.fh,
+                    figsize=(10 * self.cfg.fh, 3 * self.features),
                 )
 
             for j, feature_name in enumerate(self.feature_list):
-                for k in range(3 * self.cfg.FH):
+                for k in range(3 * self.cfg.fh):
                     ts = k // 3
                     if pretty:
                         ax = axs[j, k]
                     if k % 3 == 0:
-                        title = rf"$Y^{{t+{ts+1}}}_{{{feature_name}}}$"
+                        title = rf"$Y^{{t+{ts + 1}}}_{{{feature_name}}}$"
                         value = y[i, ..., j, ts]
                         cmap = plt.cm.coolwarm
                     elif k % 3 == 1:
-                        title = rf"$\hat{{Y}}^{{t+{ts+1}}}_{{{feature_name}}}$"
+                        title = rf"$\hat{{Y}}^{{t+{ts + 1}}}_{{{feature_name}}}$"
                         value = y_hat[i, ..., j, ts]
                         cmap = plt.cm.coolwarm
                     else:
-                        title = rf"$|Y - \hat{{Y}}|^{{t+{ts+1}}}_{{{feature_name}}}$"
+                        title = rf"$|Y - \hat{{Y}}|^{{t+{ts + 1}}}_{{{feature_name}}}$"
                         value = np.abs(y[i, ..., j, ts] - y_hat[i, ..., j, ts])
                         cmap = "binary"
 
                     if pretty:
                         draw_poland(ax, value, title, cmap, **spatial)
                     else:
-                        pl = ax[j, k].imshow(
-                            value.reshape(latitude, longitude), cmap=cmap
-                        )
+                        pl = ax[j, k].imshow(value.reshape(latitude, longitude), cmap=cmap)
                         ax[j, k].set_title(title)
                         ax[j, k].axis("off")
                         _ = fig.colorbar(pl, ax=ax[j, k], fraction=0.15)
@@ -334,9 +318,7 @@ class Trainer:
             }
 
         X, y = sample.x, sample.y
-        y, y_hat = self.predict(
-            X, y, sample.edge_index, sample.edge_attr, sample.pos, sample.time
-        )
+        y, y_hat = self.predict(X, y, sample.edge_index, sample.edge_attr, sample.pos, sample.time)
         latitude, longitude = self.latitude, self.longitude
 
         if self.spatial_mapping:
@@ -344,23 +326,23 @@ class Trainer:
             y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
             latitude, longitude = y_hat.shape[1:3]
 
-        for i in range(self.cfg.BATCH_SIZE):
+        for i in range(self.cfg.batch_size):
             if pretty:
                 fig, axs = plt.subplots(
                     self.features,
-                    self.cfg.FH,
-                    figsize=(10 * self.cfg.FH, self.features),
+                    self.cfg.fh,
+                    figsize=(10 * self.cfg.fh, self.features),
                     subplot_kw={"projection": ccrs.Mercator(central_longitude=40)},
                 )
             else:
                 fig, ax = plt.subplots(
                     self.features,
-                    self.cfg.FH,
-                    figsize=(10 * self.cfg.FH, self.features),
+                    self.cfg.fh,
+                    figsize=(10 * self.cfg.fh, self.features),
                 )
 
             for j, feature_name in enumerate(self.feature_list):
-                for k in range(self.cfg.FH):
+                for k in range(self.cfg.fh):
                     ts = k
                     if pretty:
                         ax = axs[j]
@@ -377,9 +359,7 @@ class Trainer:
                         ax[j, k].axis("off")
                         _ = fig.colorbar(pl, ax=ax[j, k], fraction=0.15)
 
-    def evaluate(
-        self, data_type="test", verbose=True, inverse_norm=True, begin=None, end=None
-    ):
+    def evaluate(self, data_type="test", verbose=True, inverse_norm=True, begin=None, end=None):
         if data_type == "train":
             loader = self.train_loader
         elif data_type == "test":
@@ -390,8 +370,8 @@ class Trainer:
             print("Invalid type: (train, test, val)")
             raise ValueError
 
-        y = np.empty((0, self.latitude, self.longitude, self.features, self.cfg.FH))
-        y_hat = np.empty((0, self.latitude, self.longitude, self.features, self.cfg.FH))
+        y = np.empty((0, self.latitude, self.longitude, self.features, self.cfg.fh))
+        y_hat = np.empty((0, self.latitude, self.longitude, self.features, self.cfg.fh))
         for batch in loader:
             if begin is not None and end is not None:
                 v_sin = batch.time[0].item()
@@ -428,10 +408,10 @@ class Trainer:
 
     def autoreg_evaluate(self, data_type="test", fh=2, verbose=True, inverse_norm=True):
         # Only works for fh=1 for now
-        self.cfg.BATCH_SIZE = 1
-        self.cfg.FH = fh
+        self.cfg.batch_size = 1
+        self.cfg.fh = fh
         self.update_data_process()
-        self.cfg.FH = 1
+        self.cfg.fh = 1
 
         if data_type == "train":
             loader = self.train_loader
@@ -443,11 +423,9 @@ class Trainer:
             print("Invalid type: (train, test, val)")
             raise ValueError
 
-        y = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(
-            self.cfg.DEVICE
-        )
+        y = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(self.cfg.device)
         y_hat = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(
-            self.cfg.DEVICE
+            self.cfg.device
         )
         y_shape = (self.latitude * self.longitude, self.features, 1)
         for batch in loader:
@@ -479,8 +457,8 @@ class Trainer:
                         input_batch.time,
                         inverse_norm=inverse_norm,
                     )
-                y_hat_i = torch.from_numpy(y_hat_it).to(self.cfg.DEVICE)
-                y_it = torch.from_numpy(y_it).to(self.cfg.DEVICE)
+                y_hat_i = torch.from_numpy(y_hat_it).to(self.cfg.device)
+                y_it = torch.from_numpy(y_it).to(self.cfg.device)
                 y_hat_autoreg_i[..., t : t + 1] = y_hat_i.reshape(y_shape)
                 y_i[..., t : t + 1] = y_it.reshape(y_shape)
 
@@ -491,9 +469,7 @@ class Trainer:
             y_hat = torch.cat(
                 (
                     y_hat,
-                    y_hat_autoreg_i.reshape(
-                        1, self.latitude, self.longitude, self.features, fh
-                    ),
+                    y_hat_autoreg_i.reshape(1, self.latitude, self.longitude, self.features, fh),
                 ),
                 dim=0,
             )
@@ -505,7 +481,7 @@ class Trainer:
             y_hat = self.nn_proc.map_latitude_longitude_span(y_hat, flat=False)
             y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
 
-        self.cfg.FH = 1
+        self.cfg.fh = 1
         return self.calculate_metrics(y_hat, y, verbose=verbose), y_hat
 
     def calculate_metrics(self, y_hat, y, verbose=False):
@@ -517,9 +493,7 @@ class Trainer:
             rmse = np.sqrt(mean_squared_error(y_hat_fi, y_fi))
             mae = mean_absolute_error(y_hat_fi, y_fi)
             if verbose:
-                print(
-                    f"RMSE for {feature_name}: {rmse}; MAE for {feature_name}: {mae};"
-                )
+                print(f"RMSE for {feature_name}: {rmse}; MAE for {feature_name}: {mae};")
             rmse_features.append(rmse)
             mae_features.append(mae)
         return rmse_features, mae_features
@@ -528,9 +502,7 @@ class Trainer:
         if isinstance(y_hat, torch.Tensor):
             y_hat = y_hat.cpu().detach().numpy()
         elif not isinstance(y_hat, np.ndarray):
-            raise ValueError(
-                "Input y_hat should be either a PyTorch Tensor or a NumPy array."
-            )
+            raise ValueError("Input y_hat should be either a PyTorch Tensor or a NumPy array.")
         if path is None:
             t = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
             path = f"../data/pred/{self.architecture}_{t}.npy"
@@ -565,9 +537,9 @@ class Trainer:
             # This always thinks it is 2024, used just for the api
             prediction_day = trig_decode(X.time[0].item(), X.time[1].item(), 365)
             prediction_hour = trig_decode(X.time[2].item(), X.time[3].item(), 24)
-            prediction_date = datetime(
-                year=2024, month=1, day=1, hour=prediction_hour
-            ) + timedelta(days=prediction_day - 1)
+            prediction_date = datetime(year=2024, month=1, day=1, hour=prediction_hour) + timedelta(
+                days=prediction_day - 1
+            )
 
         for i, lat in enumerate(lat_span):
             json_data[lat] = {}

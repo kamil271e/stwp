@@ -1,18 +1,17 @@
 import os
-import numpy as np
-import seaborn as sns
-import pandas as pd
-import matplotlib.pyplot as plt
 import warnings
-import cartopy.crs as ccrs
-import sys
-from matplotlib.colors import CenteredNorm
-from models.data_processor import DataProcessor
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from models.gnn.processor import NNDataProcessor
 
-sys.path.append("..")
-from utils.draw_functions import draw_poland
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from matplotlib.colors import CenteredNorm
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+from stwp.data.processor import DataProcessor
+from stwp.models.gnn.processor import NNDataProcessor
+from stwp.utils.visualization import draw_poland
 
 plt.style.use("ggplot")
 warnings.filterwarnings("ignore")
@@ -47,9 +46,7 @@ class Analyzer:
 
     def coherent_tensors(self):
         self.min_length = min(
-            self.pred_dict[model].shape[0]
-            for model in self.pred_dict
-            if model != "tigge"
+            self.pred_dict[model].shape[0] for model in self.pred_dict if model != "tigge"
         )
         for model, pred_tensor in self.pred_dict.items():
             if model != "tigge":
@@ -64,13 +61,9 @@ class Analyzer:
                 if "tigge" in str(model):
                     self.pred_dict[model.split("_2024")[0]] = pred_tensor
                 else:
-                    self.pred_dict[model.split("_2024")[0]] = pred_tensor[
-                        ..., 0
-                    ]  # fh=1
+                    self.pred_dict[model.split("_2024")[0]] = pred_tensor[..., 0]  # fh=1
         self.min_length = min(
-            self.pred_dict[model].shape[0]
-            for model in self.pred_dict
-            if model != "tigge"
+            self.pred_dict[model].shape[0] for model in self.pred_dict if model != "tigge"
         )
 
     def get_era5(self):
@@ -102,22 +95,12 @@ class Analyzer:
         rmse_df = pd.DataFrame(rmse_results, columns=self.feature_list, index=models)
         mae_df = pd.DataFrame(mae_results, columns=self.feature_list, index=models)
         if latex:
-            print(
-                rmse_df.to_latex(
-                    float_format="%.3f", caption="RMSE Results", label="tab:rmse"
-                )
-            )
-            print(
-                mae_df.to_latex(
-                    float_format="%.3f", caption="MAE Results", label="tab:mae"
-                )
-            )
+            print(rmse_df.to_latex(float_format="%.3f", caption="RMSE Results", label="tab:rmse"))
+            print(mae_df.to_latex(float_format="%.3f", caption="MAE Results", label="tab:mae"))
 
     def get_scalers(self):
         if self.nn_proc is None:
-            self.nn_proc = NNDataProcessor(
-                path="../data/input/data2019-2021-small.grib"
-            )
+            self.nn_proc = NNDataProcessor(path="../data/input/data2019-2021-small.grib")
             self.nn_proc.preprocess()
             self.scalers = self.nn_proc.scalers
 
@@ -135,7 +118,7 @@ class Analyzer:
         fig, axs = plt.subplots(2, 3, figsize=(15, 10))
         divider = fig.add_axes([1.05, 0.15, 0.02, 0.8])  # (left, bottom, width, height)
         vmin, vmax = 1, -1
-        for i, (feature, ax) in enumerate(zip(self.feature_list, axs.flatten())):
+        for i, (feature, ax) in enumerate(zip(self.feature_list, axs.flatten(), strict=False)):
             ax.set_title(feature)
             df_err = pd.DataFrame(
                 {
@@ -151,9 +134,7 @@ class Analyzer:
                 cmap="RdYlGn",
                 annot=True,
                 ax=ax,
-                annot_kws={
-                    "fontsize": 10
-                },  # Set font size for numbers in correlation boxes
+                annot_kws={"fontsize": 10},  # Set font size for numbers in correlation boxes
                 fmt=".2f",  # Format for the numbers (two decimal places)
                 cbar=i == 0,
                 cbar_ax=None if i else divider,
@@ -165,12 +146,8 @@ class Analyzer:
         cbar = fig.colorbar(
             axs[-1, -1].collections[0], cax=divider, pad=0.02
         )  # Adjust pad as needed
-        cbar.set_ticks(
-            np.linspace(vmin, vmax, 6)
-        )  # Adjust the number of ticks as needed
-        fig.subplots_adjust(
-            right=0.8, hspace=0.5
-        )  # Increase the vertical space between subplots
+        cbar.set_ticks(np.linspace(vmin, vmax, 6))  # Adjust the number of ticks as needed
+        fig.subplots_adjust(right=0.8, hspace=0.5)  # Increase the vertical space between subplots
         plt.tight_layout()
         if save:
             plt.savefig("../data/analysis/err_corr_matrix.pdf")
@@ -178,12 +155,10 @@ class Analyzer:
 
     def plot_pred_corr_matrix(self, save=False):
         fig, axs = plt.subplots(2, 3, figsize=(15, 10))
-        filtered_pred_dict = {
-            key: value for key, value in self.pred_dict.items() if key != "tigge"
-        }
+        filtered_pred_dict = {key: value for key, value in self.pred_dict.items() if key != "tigge"}
         divider = fig.add_axes([1.05, 0.05, 0.02, 0.8])  # (left, bottom, width, height)
         vmin, vmax = 1, -1
-        for i, (feature, ax) in enumerate(zip(self.feature_list, axs.flatten())):
+        for i, (feature, ax) in enumerate(zip(self.feature_list, axs.flatten(), strict=False)):
             ax.set_title(feature)
             df_pred = pd.DataFrame(
                 {
@@ -201,9 +176,7 @@ class Analyzer:
                 ax=ax,
                 annot_kws={"fontsize": 8},
                 cbar=i == 0,
-                cbar_ax=None
-                if i
-                else divider,  # Use the shared colorbar axis for all subplots
+                cbar_ax=None if i else divider,  # Use the shared colorbar axis for all subplots
                 vmin=vmin,
                 vmax=vmax,  # Set colorbar limits
             )
@@ -211,9 +184,7 @@ class Analyzer:
         cbar = fig.colorbar(
             axs[-1, -1].collections[0], cax=divider, pad=0.02
         )  # Adjust pad as needed
-        cbar.set_ticks(
-            np.linspace(vmin, vmax, 6)
-        )  # Adjust the number of ticks as needed
+        cbar.set_ticks(np.linspace(vmin, vmax, 6))  # Adjust the number of ticks as needed
         plt.tight_layout()
         if save:
             plt.savefig("../data/analysis/pred_corr_matrix.pdf")
@@ -231,9 +202,7 @@ class Analyzer:
         if plot:
             losses = np.zeros_like(alphas)
             for i, a in enumerate(alphas):
-                losses[i] = self.combine_and_evaluate(
-                    y_trans, y_tigge, alpha=a, consolidate=True
-                )
+                losses[i] = self.combine_and_evaluate(y_trans, y_tigge, alpha=a, consolidate=True)
             plt.plot(alphas, losses, "-o")
             plt.title("Combined models")
             plt.xlabel(r"$\alpha$")
@@ -254,9 +223,7 @@ class Analyzer:
                 era5_normalized_i = self.scalers[i].transform(
                     self.era5[1::2][..., i].reshape(-1, 1)
                 )
-                losses[i] = np.sqrt(
-                    mean_squared_error(y_normalized_i, era5_normalized_i)
-                )
+                losses[i] = np.sqrt(mean_squared_error(y_normalized_i, era5_normalized_i))
             return np.mean(losses)
         self.calculate_metrics(y, self.era5[1::2])
 
@@ -267,7 +234,7 @@ class Analyzer:
                 index=self.feature_list,
                 columns=["Mean", "Standard Deviation", "Skewness", "Kurtosis"],
             )
-        for i, (feature, ax) in enumerate(zip(self.feature_list, axes.flatten())):
+        for i, (feature, ax) in enumerate(zip(self.feature_list, axes.flatten(), strict=False)):
             data_for_feature = self.era5[..., i].flatten()
             if plot_type == "dist":
                 sns.distplot(data_for_feature, kde=True, color="maroon", ax=ax)
@@ -325,8 +292,8 @@ class Analyzer:
         plt.show()
 
     def calculate_avg_err(self):
-        for model in self.er_dict.keys():
-            avg_tensor = np.zeros((self.er_dict[model].shape[1:]))
+        for model in self.er_dict:
+            avg_tensor = np.zeros(self.er_dict[model].shape[1:])
             for i in range(len(self.feature_list)):
                 avg_tensor[..., i] = np.mean(self.er_dict[model][..., i], axis=0)
             self.avg_er_dict[model] = avg_tensor
@@ -340,7 +307,7 @@ class Analyzer:
             mae = mean_absolute_error(y_hat_fi, y_fi)
             if verbose:
                 print(
-                    f"RMSE for {self.feature_list[i]}: {round(rmse,3)}; MAE for {self.feature_list[i]}: {round(mae,3)};"
+                    f"RMSE for {self.feature_list[i]}: {round(rmse, 3)}; MAE for {self.feature_list[i]}: {round(mae, 3)};"
                 )
             rmse_features.append(rmse)
             mae_features.append(mae)
