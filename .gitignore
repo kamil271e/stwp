@@ -165,3 +165,7 @@ cython_debug/
 *.pdf
 *.npy
 
+# claude
+.claude/
+CLAUDE.md
+*_PLAN.md
