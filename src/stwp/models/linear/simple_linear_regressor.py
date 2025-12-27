@@ -95,15 +95,16 @@ class SimpleLinearRegressor(BaselineRegressor):
         Returns:
             Predictions array
         """
+        y_hat: NDArray[np.floating[Any]]
         if self.fh == 1:
-            y_hat = []
+            y_hat_list = []
             for i in range(self.num_features):
                 Xi = X_test[..., i].reshape(-1, self.neighbours * self.input_state)
                 y_hat_i = (
                     self.models[i].predict(Xi).reshape(-1, self.latitude, self.longitude, self.fh)
                 )
-                y_hat.append(y_hat_i)
-            y_hat = np.array(y_hat).transpose((1, 2, 3, 4, 0))
+                y_hat_list.append(y_hat_i)
+            y_hat = np.array(y_hat_list).transpose((1, 2, 3, 4, 0))
         else:
             y_hat = self.predict_autoreg(X_test, y_test)
         return y_hat

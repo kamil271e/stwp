@@ -165,6 +165,11 @@ class NNDataProcessor:
         Xi_shape = self.num_latitudes * self.num_longitudes * self.cfg.input_size
         yi_shape = self.num_latitudes * self.num_longitudes * self.cfg.forecast_horizon
 
+        if self.train_size is None or self.test_size is None or self.val_size is None:
+            raise ValueError("Data sizes not initialized")
+        if self.scalers is None:
+            raise ValueError("Scalers not initialized")
+
         for i in range(self.num_features):
             X_train_i = X_train[..., i].reshape(-1, 1)
             X_test_i = X_test[..., i].reshape(-1, 1)
@@ -223,6 +228,9 @@ class NNDataProcessor:
         Returns:
             Tuple of (X, y) original scale arrays
         """
+        if self.scalers is None:
+            raise ValueError("Scalers not initialized")
+
         X = X.transpose((0, 1, 3, 2))
         y = y.transpose((0, 1, 3, 2))
         for i in range(self.num_features):
@@ -330,10 +338,14 @@ class NNDataProcessor:
             Xi = torch.from_numpy(X[i].astype("float32")).to(self.cfg.device)
             yi = torch.from_numpy(y[i].astype("float32")).to(self.cfg.device)
             if self.temporal_encoding:
+                if self.temporal_data is None:
+                    raise ValueError("Temporal data not initialized")
                 ti = torch.from_numpy(self.temporal_data[i].astype("float32")).to(self.cfg.device)
             else:
                 ti = None
             if self.spatial_encoding:
+                if self.spatial_data is None:
+                    raise ValueError("Spatial data not initialized")
                 si = torch.from_numpy(self.spatial_data.astype("float32")).to(self.cfg.device)
             else:
                 si = None
@@ -347,6 +359,9 @@ class NNDataProcessor:
             )
             g = g.to(self.cfg.device)
             dataset.append(g)
+
+        if self.train_size is None or self.val_size is None or self.test_size is None:
+            raise ValueError("Data sizes not initialized")
 
         train_dataset = dataset[: self.train_size]
         val_dataset = dataset[self.train_size : self.train_size + self.val_size]

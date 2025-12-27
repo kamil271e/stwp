@@ -98,7 +98,7 @@ class PredictionService:
         self._download_data()
 
         # Create trainer and load model
-        trainer = Trainer(architecture="trans", hidden_dim=32)
+        trainer = Trainer()
         trainer.load_model(str(self._model_path))
 
         # Determine which sequence to use based on current hour
@@ -146,6 +146,8 @@ class PredictionService:
         with self._lock:
             if self._should_update():
                 self._refresh_data()
+            if self._json_data is None:
+                raise ValueError("Failed to load prediction data")
             return self._json_data
 
     def get_last_update(self) -> datetime | None:
@@ -167,6 +169,11 @@ class PredictionService:
         Returns:
             Tuple of (lat_fraction, lng_fraction)
         """
+        if self._lat_max is None or self._lat_min is None:
+            raise ValueError("Latitude bounds not initialized")
+        if self._lng_max is None or self._lng_min is None:
+            raise ValueError("Longitude bounds not initialized")
+
         latitudes = np.arange(self._lat_max, self._lat_min - self._coord_acc, -self._coord_acc)
         longitudes = np.arange(self._lng_min, self._lng_max + self._coord_acc, self._coord_acc)
 
@@ -197,6 +204,11 @@ class PredictionService:
         Returns:
             Interpolated value
         """
+        if self._lat_max is None or self._lat_min is None:
+            raise ValueError("Latitude bounds not initialized")
+        if self._lng_max is None or self._lng_min is None:
+            raise ValueError("Longitude bounds not initialized")
+
         lat_index = int(np.floor((self._lat_max - lat) / self._coord_acc))
         lng_index = int(np.floor((lng - self._lng_min) / self._coord_acc))
 
@@ -240,6 +252,11 @@ class PredictionService:
         with self._lock:
             if self._should_update():
                 self._refresh_data()
+
+            if self._json_data is None:
+                raise ValueError("Failed to load prediction data")
+            if self._lat_min is None or self._lng_min is None:
+                raise ValueError("Coordinate bounds not initialized")
 
             json_data = self._json_data
 

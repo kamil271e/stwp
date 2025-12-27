@@ -89,7 +89,7 @@ class Trainer(GNNTrainer):
             base_units=self.base_units,
         ).to(self.cfg.device)
 
-    def train(self, num_epochs: int = 100, verbose: bool = True) -> None:  # type: ignore[override]
+    def train(self, num_epochs: int = 100, verbose: bool = True) -> None:
         """Train the model.
 
         Args:
@@ -247,26 +247,28 @@ class Trainer(GNNTrainer):
             .reshape(-1, self.latitude, self.longitude, self.cfg.forecast_horizon, self.features)
             .permute((0, 1, 2, 4, 3))
         )
-        y_hat = y_hat.cpu().detach().numpy()
+        y_hat_np: NDArray[Any] = y_hat.cpu().detach().numpy()
 
         y = y.reshape(
             -1, self.latitude, self.longitude, self.cfg.forecast_horizon, self.features
         ).permute((0, 1, 2, 4, 3))
-        y = y.cpu().detach().numpy()
+        y_np: NDArray[Any] = y.cpu().detach().numpy()
 
         yshape = (self.latitude, self.longitude, self.cfg.forecast_horizon)
 
         for i in range(self.features):
-            for j in range(y_hat.shape[0]):
-                yi = y[j, ..., i, :].copy().reshape(-1, 1)
-                yhat_i = y_hat[j, ..., i, :].copy().reshape(-1, 1)
+            for j in range(y_hat_np.shape[0]):
+                yi = y_np[j, ..., i, :].copy().reshape(-1, 1)
+                yhat_i = y_hat_np[j, ..., i, :].copy().reshape(-1, 1)
 
                 if inverse_norm:
-                    y[j, ..., i, :] = self.scalers[i].inverse_transform(yi).reshape(yshape)
-                    y_hat[j, ..., i, :] = self.scalers[i].inverse_transform(yhat_i).reshape(yshape)
+                    y_np[j, ..., i, :] = self.scalers[i].inverse_transform(yi).reshape(yshape)
+                    y_hat_np[j, ..., i, :] = (
+                        self.scalers[i].inverse_transform(yhat_i).reshape(yshape)
+                    )
         if inverse_norm:
-            y_hat = self.clip_total_cloud_cover(y_hat)
-        return y, y_hat
+            y_hat_np = self.clip_total_cloud_cover(y_hat_np)
+        return y_np, y_hat_np
 
     def save_prediction_tensor(
         self,

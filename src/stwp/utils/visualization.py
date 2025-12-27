@@ -59,7 +59,7 @@ def draw_poland(
         ax.add_feature(cfeature.BORDERS)
         ax.set_title(title)
 
-    contour_plot = ax.contourf(
+    contour_plot: QuadContourSet = ax.contourf(
         lon_span, lat_span, data, transform=ccrs.PlateCarree(), cmap=cmap, norm=norm
     )
     if method == 1:

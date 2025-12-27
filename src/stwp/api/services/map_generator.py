@@ -19,6 +19,7 @@ import numpy as np
 from stwp.features import Features
 
 if TYPE_CHECKING:
+    from cartopy.mpl.geoaxes import GeoAxes
     from matplotlib.contour import QuadContourSet
 
 logger = logging.getLogger(__name__)
@@ -122,36 +123,39 @@ class MapGenerator:
         lng_arr = np.arange(lng_min, lng_max + self.coord_acc, self.coord_acc)
 
         features = {
-            "tcc": np.array(
+            Features.TCC: np.array(
                 [
                     [
                         [
-                            max(0.0, min(1.0, json_data[lat][lng]["tcc"][ts]))
-                            for ts in json_data[lat][lng]["tcc"]
+                            max(0.0, min(1.0, json_data[lat][lng][Features.TCC][ts]))
+                            for ts in json_data[lat][lng][Features.TCC]
                         ]
                         for lng in json_data[lat]
                     ]
                     for lat in json_data
                 ]
             ),
-            "tp": np.array(
+            Features.TP: np.array(
                 [
                     [
                         [
-                            max(0.0, min(100.0, json_data[lat][lng]["tp"][ts]))
-                            if json_data[lat][lng]["tp"][ts] >= 0.05
+                            max(0.0, min(100.0, json_data[lat][lng][Features.TP][ts]))
+                            if json_data[lat][lng][Features.TP][ts] >= 0.05
                             else 0.0
-                            for ts in json_data[lat][lng]["tp"]
+                            for ts in json_data[lat][lng][Features.TP]
                         ]
                         for lng in json_data[lat]
                     ]
                     for lat in json_data
                 ]
             ),
-            "t2m": np.array(
+            Features.T2M: np.array(
                 [
                     [
-                        [json_data[lat][lng]["t2m"][ts] for ts in json_data[lat][lng]["t2m"]]
+                        [
+                            json_data[lat][lng][Features.T2M][ts]
+                            for ts in json_data[lat][lng][Features.T2M]
+                        ]
                         for lng in json_data[lat]
                     ]
                     for lat in json_data
@@ -170,13 +174,13 @@ class MapGenerator:
         Returns:
             Dictionary of range arrays for each feature
         """
-        t2m_min = math.ceil(np.min(features["t2m"]))
-        t2m_max = math.floor(np.max(features["t2m"]))
+        t2m_min = math.ceil(np.min(features[Features.T2M]))
+        t2m_max = math.floor(np.max(features[Features.T2M]))
 
         return {
-            "tp": np.array(self.PRECIPITATION_LEVELS),
-            "tcc": np.arange(0.01, 1.01, 0.01),
-            "t2m": np.arange(t2m_min - 1, t2m_max + 2, 1),
+            Features.TP: np.array(self.PRECIPITATION_LEVELS),
+            Features.TCC: np.arange(0.01, 1.01, 0.01),
+            Features.T2M: np.arange(t2m_min - 1, t2m_max + 2, 1),
         }
 
     def _create_feature_map(
@@ -205,11 +209,13 @@ class MapGenerator:
         data_crs = ccrs.PlateCarree()
 
         _ = plt.figure(1, figsize=(14, 12))
-        ax = plt.subplot(1, 1, 1, projection=map_crs)
+        ax: GeoAxes = plt.subplot(1, 1, 1, projection=map_crs)
         ax.set_extent([14, 25, 49, 55])
 
         # Create contour plot with appropriate colormap
-        if feature_name == "tp":
+        cmap_obj: Any
+        cf: QuadContourSet
+        if feature_name == Features.TP:
             cmap_obj = mcolors.ListedColormap(self.PRECIPITATION_COLORS, "custom_cmap")
             norm = mcolors.BoundaryNorm(self.PRECIPITATION_LEVELS, cmap_obj.N)
             cf = ax.contourf(
@@ -264,10 +270,10 @@ class MapGenerator:
         max_val = float(np.max(ranges))
 
         ticks: list[float]
-        if feature_name == "t2m":
+        if feature_name == Features.T2M:
             ticks = list(np.linspace(min_val, max_val, num=len(ranges)))
             ticklabels = [f"{int(tick)}" for tick in ticks]
-        elif feature_name == "tcc":
+        elif feature_name == Features.TCC:
             ticks = list(np.linspace(min_val, max_val, num=11))
             ticklabels = [f"{int(tick * 100)}" for tick in ticks]
         else:

@@ -15,8 +15,9 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from stwp.config import Config
 from stwp.data.processor import DataProcessor
+from stwp.features import Features
 from stwp.models.gnn.callbacks import CkptCallback, EarlyStoppingCallback, LRAdjustCallback
-from stwp.models.gnn.gnn_module import GNNModule
+from stwp.models.gnn.gnn_module import ArchitectureType, GNNModule
 from stwp.models.gnn.processor import NNDataProcessor
 from stwp.utils.encoding import trig_decode
 from stwp.utils.visualization import draw_poland
@@ -31,7 +32,7 @@ class Trainer:
 
     def __init__(
         self,
-        architecture: str = "trans",
+        architecture: ArchitectureType = ArchitectureType.TRANSFORMER,
         hidden_dim: int = 32,
         lr: float = 1e-3,
         gamma: float = 0.5,
@@ -90,13 +91,13 @@ class Trainer:
         self.early_stop_callback: EarlyStoppingCallback | None = None
         self.init_train_details()
 
-    def update_config(self, c: Any) -> None:
+    def update_config(self, config: Any) -> None:
         """Update configuration.
 
         Args:
-            c: New configuration
+            config: New configuration
         """
-        self.cfg = c
+        self.cfg = config
         self.init_architecture()
         self.update_data_process()
         self.init_train_details()
@@ -115,6 +116,8 @@ class Trainer:
         self.edge_weights = self.nn_proc.edge_weights
         self.edge_attr = self.nn_proc.edge_attr
         self.scalers = self.nn_proc.scalers
+        if self.train_loader is None or self.val_loader is None or self.test_loader is None:
+            raise ValueError("Data loaders not properly initialized")
         self.train_size = len(self.train_loader)
         self.val_size = len(self.val_loader)
         self.test_size = len(self.test_loader)
@@ -131,19 +134,18 @@ class Trainer:
         """Initialize model architecture."""
         if self.edge_attr is None or self.features is None:
             raise ValueError("Data must be processed before initializing architecture")
-        init_dict = {
-            "arch": self.architecture,
-            "input_features": self.features,
-            "output_features": self.features,
-            "edge_dim": self.edge_attr.size(-1),
-            "hidden_dim": self.hidden_dim,
-            "input_t_dim": self.nn_proc.num_temporal_constants,
-            "input_s_dim": self.nn_proc.num_spatial_constants,
-            "input_size": self.cfg.input_size,
-            "fh": self.cfg.forecast_horizon,
-            "num_graph_cells": self.cfg.graph_cells,
-        }
-        self.model = GNNModule(**init_dict).to(self.cfg.device)
+        self.model = GNNModule(
+            architecture=self.architecture,
+            input_features=self.features,
+            output_features=self.features,
+            edge_dim=self.edge_attr.size(-1),
+            hidden_dim=self.hidden_dim,
+            input_t_dim=self.nn_proc.num_temporal_constants,
+            input_s_dim=self.nn_proc.num_spatial_constants,
+            input_size=self.cfg.input_size,
+            fh=self.cfg.forecast_horizon,
+            num_graph_cells=self.cfg.graph_cells,
+        ).to(self.cfg.device)
 
     def init_train_details(self) -> None:
         """Initialize training details."""
@@ -198,8 +200,8 @@ class Trainer:
                 batch_y = batch.y
 
                 if self.spatial_mapping:
-                    y_hat = self.nn_proc.map_latitude_longitude_span(y_hat)
-                    batch_y = self.nn_proc.map_latitude_longitude_span(batch.y)
+                    y_hat = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y_hat))
+                    batch_y = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(batch.y))
 
                 loss = self.criterion(y_hat, batch_y)
                 loss.backward()
@@ -230,8 +232,10 @@ class Trainer:
                     batch_y = batch.y
 
                     if self.spatial_mapping:
-                        y_hat = self.nn_proc.map_latitude_longitude_span(y_hat)
-                        batch_y = self.nn_proc.map_latitude_longitude_span(batch.y)
+                        y_hat = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y_hat))
+                        batch_y = self._ensure_numpy(
+                            self.nn_proc.map_latitude_longitude_span(batch.y)
+                        )
 
                     loss = self.criterion(y_hat, batch_y)
                     val_loss += loss.item()
@@ -272,7 +276,7 @@ class Trainer:
     def predict(
         self,
         X: torch.Tensor,
-        y: torch.Tensor,
+        y_tensor: torch.Tensor,
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
         s: torch.Tensor,
@@ -283,7 +287,7 @@ class Trainer:
 
         Args:
             X: Input features
-            y: Target values
+            y_tensor: Target values
             edge_index: Edge indices
             edge_attr: Edge attributes
             s: Spatial features
@@ -295,13 +299,15 @@ class Trainer:
         """
         if self.model is None or self.features is None or self.scalers is None:
             raise ValueError("Model not properly initialized")
-        y = y.reshape((-1, self.latitude, self.longitude, self.features, self.cfg.forecast_horizon))
-        y_hat = self.model(X, edge_index, edge_attr, t, s).reshape(
+        y_reshaped = y_tensor.reshape(
+            (-1, self.latitude, self.longitude, self.features, self.cfg.forecast_horizon)
+        )
+        y_hat_tensor = self.model(X, edge_index, edge_attr, t, s).reshape(
             (-1, self.latitude, self.longitude, self.features, self.cfg.forecast_horizon)
         )
 
-        y = y.cpu().detach().numpy()
-        y_hat = y_hat.cpu().detach().numpy()
+        y: NDArray[Any] = y_reshaped.cpu().detach().numpy()
+        y_hat: NDArray[Any] = y_hat_tensor.cpu().detach().numpy()
 
         if inverse_norm:
             y_shape = (self.latitude, self.longitude, self.cfg.forecast_horizon)
@@ -342,7 +348,7 @@ class Trainer:
         else:
             raise ValueError("Invalid type: (train, test, val)")
 
-        spatial = {}
+        spatial: dict[str, Any] = {}
         if pretty:
             lat_span, lon_span, spatial_limits = DataProcessor.get_spatial_info()
             spatial = {
@@ -351,13 +357,15 @@ class Trainer:
                 "spatial_limits": spatial_limits,
             }
 
-        X, y = sample.x, sample.y
-        y, y_hat = self.predict(X, y, sample.edge_index, sample.edge_attr, sample.pos, sample.time)
+        X, y_sample = sample.x, sample.y
+        y, y_hat = self.predict(
+            X, y_sample, sample.edge_index, sample.edge_attr, sample.pos, sample.time
+        )
         latitude, longitude = self.latitude, self.longitude
 
         if self.spatial_mapping:
-            y_hat = self.nn_proc.map_latitude_longitude_span(y_hat, flat=False)
-            y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
+            y_hat = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y_hat, flat=False))
+            y = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y, flat=False))
             latitude, longitude = y_hat.shape[1:3]
 
         for i in range(self.cfg.batch_size):
@@ -426,7 +434,7 @@ class Trainer:
         else:
             raise ValueError("Invalid type: (train, test, val)")
 
-        spatial = {}
+        spatial: dict[str, Any] = {}
         if pretty:
             lat_span, lon_span, spatial_limits = DataProcessor.get_spatial_info()
             spatial = {
@@ -435,13 +443,15 @@ class Trainer:
                 "spatial_limits": spatial_limits,
             }
 
-        X, y = sample.x, sample.y
-        y, y_hat = self.predict(X, y, sample.edge_index, sample.edge_attr, sample.pos, sample.time)
+        X, y_sample = sample.x, sample.y
+        y, y_hat = self.predict(
+            X, y_sample, sample.edge_index, sample.edge_attr, sample.pos, sample.time
+        )
         latitude, longitude = self.latitude, self.longitude
 
         if self.spatial_mapping:
-            y_hat = self.nn_proc.map_latitude_longitude_span(y_hat, flat=False)
-            y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
+            y_hat = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y_hat, flat=False))
+            y = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y, flat=False))
             latitude, longitude = y_hat.shape[1:3]
 
         for i in range(self.cfg.batch_size):
@@ -533,8 +543,8 @@ class Trainer:
             y_hat = np.concatenate((y_hat, y_hat_i), axis=0)
 
         if self.spatial_mapping:
-            y_hat = self.nn_proc.map_latitude_longitude_span(y_hat, flat=False)
-            y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
+            y_hat = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y_hat, flat=False))
+            y = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y, flat=False))
         try:
             return self.calculate_metrics(y_hat, y, verbose=verbose), y_hat
         except Exception as e:
@@ -577,8 +587,10 @@ class Trainer:
         else:
             raise ValueError("Invalid type: (train, test, val)")
 
-        y = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(self.cfg.device)
-        y_hat = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(
+        y_accum = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(
+            self.cfg.device
+        )
+        y_hat_accum = torch.empty((0, self.latitude, self.longitude, self.features, fh)).to(
             self.cfg.device
         )
         y_shape = (self.latitude * self.longitude, self.features, 1)
@@ -612,29 +624,29 @@ class Trainer:
                         input_batch.time,
                         inverse_norm=inverse_norm,
                     )
-                y_hat_i = torch.from_numpy(y_hat_it).to(self.cfg.device)
-                y_it = torch.from_numpy(y_it).to(self.cfg.device)
-                y_hat_autoreg_i[..., t : t + 1] = y_hat_i.reshape(y_shape)
-                y_i[..., t : t + 1] = y_it.reshape(y_shape)
+                y_hat_i_tensor = torch.from_numpy(y_hat_it).to(self.cfg.device)
+                y_it_tensor = torch.from_numpy(y_it).to(self.cfg.device)
+                y_hat_autoreg_i[..., t : t + 1] = y_hat_i_tensor.reshape(y_shape)
+                y_i[..., t : t + 1] = y_it_tensor.reshape(y_shape)
 
-            y = torch.cat(
-                (y, y_i.reshape(1, self.latitude, self.longitude, self.features, fh)),
+            y_accum = torch.cat(
+                (y_accum, y_i.reshape(1, self.latitude, self.longitude, self.features, fh)),
                 dim=0,
             )
-            y_hat = torch.cat(
+            y_hat_accum = torch.cat(
                 (
-                    y_hat,
+                    y_hat_accum,
                     y_hat_autoreg_i.reshape(1, self.latitude, self.longitude, self.features, fh),
                 ),
                 dim=0,
             )
 
-        y_hat = y_hat.cpu().detach().numpy()
-        y = y.cpu().detach().numpy()
+        y_hat: NDArray[Any] = y_hat_accum.cpu().detach().numpy()
+        y: NDArray[Any] = y_accum.cpu().detach().numpy()
 
         if self.spatial_mapping:
-            y_hat = self.nn_proc.map_latitude_longitude_span(y_hat, flat=False)
-            y = self.nn_proc.map_latitude_longitude_span(y, flat=False)
+            y_hat = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y_hat, flat=False))
+            y = self._ensure_numpy(self.nn_proc.map_latitude_longitude_span(y, flat=False))
 
         self.cfg.forecast_horizon = 1
         return self.calculate_metrics(y_hat, y, verbose=verbose), y_hat
@@ -700,7 +712,7 @@ class Trainer:
         print(f"Model parameters: {params}")
 
     @staticmethod
-    def clip_total_cloud_cover(y_hat: NDArray[Any], idx: int = 2) -> NDArray[Any]:
+    def clip_total_cloud_cover(y_hat: NDArray[Any], idx: int = Features.TCC_IDX) -> NDArray[Any]:
         """Clip total cloud cover to valid range.
 
         Args:
@@ -747,11 +759,14 @@ class Trainer:
                     X = data
                     break
 
+        if X is None:
+            raise ValueError("No data found in test loader")
+
         _, y_hat = self.predict(X.x, X.y, X.edge_index, X.edge_attr, X.pos, X.time)
         y_hat = y_hat.reshape((self.latitude, self.longitude, self.features, -1))
         lat_span, lon_span, _ = DataProcessor.get_spatial_info()
-        lat_span = list(lat_span[:, 0])
-        lon_span = list(lon_span[0, :])
+        lat_span_list = list(lat_span[:, 0])
+        lon_span_list = list(lon_span[0, :])
 
         json_data: dict[str, Any] = {}
 
@@ -762,10 +777,10 @@ class Trainer:
             days=prediction_day
         )
 
-        for i, lat in enumerate(lat_span):
+        for i, lat in enumerate(lat_span_list):
             lat_key = str(lat)
             json_data[lat_key] = {}
-            for j, lon in enumerate(lon_span):
+            for j, lon in enumerate(lon_span_list):
                 lon_key = str(lon)
                 json_data[lat_key][lon_key] = {}
                 for k, feature in enumerate(self.feature_list):
@@ -780,3 +795,8 @@ class Trainer:
                 json.dump(json_data, f, indent=2, ensure_ascii=False)
 
         return json_data
+
+    def _ensure_numpy(self, data: NDArray[Any] | torch.Tensor) -> NDArray[Any]:
+        if isinstance(data, torch.Tensor):
+            return data.cpu().detach().numpy()
+        return data

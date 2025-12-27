@@ -222,7 +222,7 @@ class BaselineRegressor:
             pretty: Whether to use cartopy for pretty maps
             save: Whether to save figures
         """
-        spatial = {}
+        spatial: dict[str, Any] = {}
         if pretty:
             lat_span, lon_span, spatial_limits = DataProcessor.get_spatial_info()
             spatial = {
@@ -313,14 +313,15 @@ class BaselineRegressor:
             -1,
             self.neighbours * self.input_state * (self.num_features + self.num_spatial_constants),
         )
+        y_hat: NDArray[np.floating[Any]]
         if self.fh == 1:
-            y_hat = []
+            y_hat_list = []
             for i in range(self.num_features):
                 y_hat_i = (
                     self.models[i].predict(X).reshape(-1, self.latitude, self.longitude, self.fh)
                 )
-                y_hat.append(y_hat_i)
-            y_hat = np.array(y_hat).transpose((1, 2, 3, 4, 0))
+                y_hat_list.append(y_hat_i)
+            y_hat = np.array(y_hat_list).transpose((1, 2, 3, 4, 0))
         else:
             y_hat = self.predict_autoreg(X_test, y_test)
         y_hat = self.clip_total_cloud_cover(y_hat)
