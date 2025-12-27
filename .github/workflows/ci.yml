@@ -78,5 +78,3 @@ jobs:
           file: ./api/Dockerfile
           push: false
           tags: stwp-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
