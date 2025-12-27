@@ -153,7 +153,8 @@ class GNNModule(torch.nn.Module):
         x = self.mlp_embedder(x)
         x = self.st_encoder(x, t, s)
         x = self.layer_norm_embed(x).relu()
-        for gnn in self.gnns:
-            x = x + gnn(x, edge_index, edge_attr).relu()
+        if self.gnns is not None:
+            for gnn in self.gnns:
+                x = x + gnn(x, edge_index, edge_attr).relu()
         x = self.mlp_decoder(x)
         return x.view(x.size(0), x.size(1) // self.fh, self.fh)

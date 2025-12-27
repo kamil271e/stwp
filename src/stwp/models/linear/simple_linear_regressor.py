@@ -14,7 +14,9 @@ from stwp.models.base import BaselineRegressor, RegressorType, Scaler, get_radiu
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-LinearModel = ElasticNet | Lasso | LinearRegression | Ridge
+from typing import TypeAlias
+
+LinearModel: TypeAlias = ElasticNet | Lasso | LinearRegression | Ridge
 
 
 class SimpleLinearRegressor(BaselineRegressor):
@@ -30,7 +32,7 @@ class SimpleLinearRegressor(BaselineRegressor):
         feature_list: list[str],
         regressor_type: RegressorType = RegressorType.LINEAR,
         alpha: float = 1.0,
-        scaler_type: Scaler = Scaler.STANDARD,
+        scaler_type: type = Scaler.STANDARD,
     ):
         """Initialize the simple linear regressor.
 

@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 
 
 class Scaler:
-    MIN_MAX = MinMaxScaler
-    STANDARD = StandardScaler
-    MAX_ABS = MaxAbsScaler
-    ROBUST = RobustScaler
+    MIN_MAX: type[MinMaxScaler] = MinMaxScaler
+    STANDARD: type[StandardScaler] = StandardScaler
+    MAX_ABS: type[MaxAbsScaler] = MaxAbsScaler
+    ROBUST: type[RobustScaler] = RobustScaler
 
 
 class RegressorType(StrEnum):
@@ -56,7 +56,10 @@ class BaselineRegressor:
         X_shape: tuple[int, ...],
         fh: int,
         feature_list: list[str],
-        scaler_type: Scaler = Scaler.STANDARD,
+        scaler_type: type[StandardScaler]
+        | type[MinMaxScaler]
+        | type[MaxAbsScaler]
+        | type[RobustScaler] = Scaler.STANDARD,
     ):
         """Initialize the baseline regressor.
 
@@ -262,11 +265,11 @@ class BaselineRegressor:
                     if k % 3 == 0:
                         title = rf"$Y^{{t+{ts + 1}}}_{{{cur_feature}}}$"
                         value = y_test[i, ..., ts, j]
-                        cmap = plt.cm.coolwarm
+                        cmap = plt.cm.coolwarm  # type: ignore[attr-defined]
                     elif k % 3 == 1:
                         title = rf"$\hat{{Y}}^{{t+{ts + 1}}}_{{{cur_feature}}}$"
                         value = y_hat[i, ..., ts, j]
-                        cmap = plt.cm.coolwarm
+                        cmap = plt.cm.coolwarm  # type: ignore[attr-defined]
                     else:
                         title = rf"$|Y - \hat{{Y}}|^{{t+{ts + 1}}}_{{{cur_feature}}}$"
                         value = np.abs(y_test[i, ..., ts, j] - y_hat[i, ..., ts, j])

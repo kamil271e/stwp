@@ -41,7 +41,7 @@ class CNNDataProcessor(NNDataProcessor):
         """
         X_train, X_test, y_train, y_test = self.train_val_test_split()
         X, y = self.fit_transform_scalers(
-            X_train, X_test, y_train, y_test, scaler_type=self.cfg.scalar_type
+            X_train, X_test, y_train, y_test, scaler_type=self.cfg.scaler_type
         )
         X = X.transpose((0, 1, 3, 2))
         y = y.transpose((0, 1, 3, 2))

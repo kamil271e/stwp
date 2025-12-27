@@ -96,7 +96,7 @@ class NNDataProcessor:
         self.edge_index, self.edge_weights, self.edge_attr = self.create_edges()
         X_train, X_test, y_train, y_test = self.train_val_test_split()
         X, y = self.fit_transform_scalers(
-            X_train, X_test, y_train, y_test, scaler_type=self.cfg.scalar_type
+            X_train, X_test, y_train, y_test, scaler_type=self.cfg.scaler_type
         )
         self.train_loader, self.val_loader, self.test_loader = self.get_loaders(
             X, y, subset, test_shuffle=self.test_shuffle

@@ -77,7 +77,9 @@ class Trainer(GNNTrainer):
 
     def init_architecture(self) -> None:
         """Initialize U-NET model architecture."""
-        self.model = UNet(
+        if self.features is None:
+            raise ValueError("Features must be initialized before architecture")
+        self.model = UNet(  # type: ignore[assignment]
             features=self.features,
             spatial_features=self.nn_proc.num_spatial_constants,
             temporal_features=self.nn_proc.num_temporal_constants,
@@ -87,14 +89,28 @@ class Trainer(GNNTrainer):
             base_units=self.base_units,
         ).to(self.cfg.device)
 
-    def train(self, num_epochs: int = 100) -> None:
+    def train(self, num_epochs: int = 100, verbose: bool = True) -> None:  # type: ignore[override]
         """Train the model.
 
         Args:
             num_epochs: Number of training epochs
+            verbose: Whether to print training progress
         """
-        train_loss_list = []
-        val_loss_list = []
+        if (
+            self.model is None
+            or self.train_loader is None
+            or self.val_loader is None
+            or self.optimizer is None
+            or self.subset is None
+            or self.val_size is None
+            or self.features is None
+            or self.lr_callback is None
+            or self.ckpt_callback is None
+            or self.early_stop_callback is None
+        ):
+            raise ValueError("Trainer not properly initialized")
+        train_loss_list: list[float] = []
+        val_loss_list: list[float] = []
 
         start = time.time()
 
@@ -138,7 +154,8 @@ class Trainer(GNNTrainer):
             avg_loss = total_loss / (self.subset * self.cfg.batch_size)
             last_lr = self.optimizer.param_groups[0]["lr"]
 
-            print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_loss:.5f}, lr: {last_lr}")
+            if verbose:
+                print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {avg_loss:.5f}, lr: {last_lr}")
             train_loss_list.append(avg_loss)
 
             self.model.eval()
@@ -178,7 +195,8 @@ class Trainer(GNNTrainer):
                     val_loss += loss.item()
 
             avg_val_loss = val_loss / (min(self.subset, self.val_size) * self.cfg.batch_size)
-            print(f"Val Loss: {avg_val_loss:.5f}\n---------")
+            if verbose:
+                print(f"Val Loss: {avg_val_loss:.5f}\n---------")
             val_loss_list.append(avg_val_loss)
 
             self.lr_callback.step(val_loss)
@@ -188,8 +206,9 @@ class Trainer(GNNTrainer):
                 break
 
         end = time.time()
-        print(f"{end - start} [s]")
-        self.plot_loss(val_loss_list, train_loss_list)
+        if verbose:
+            print(f"{end - start} [s]")
+            self.plot_loss(val_loss_list, train_loss_list)
 
     def predict(
         self,
@@ -215,6 +234,8 @@ class Trainer(GNNTrainer):
         Returns:
             Tuple of (y, y_hat) arrays
         """
+        if self.model is None or self.features is None or self.scalers is None:
+            raise ValueError("Model not properly initialized")
         X = (
             X.reshape(-1, self.latitude, self.longitude, self.cfg.input_size * self.features)
             .permute((0, 3, 1, 2))

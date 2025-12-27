@@ -1,10 +1,12 @@
 """Map generation service for weather visualization."""
 
+from __future__ import annotations
+
 import logging
 import math
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cartopy.crs as ccrs
 import cartopy.io.shapereader as shpreader
@@ -15,6 +17,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from stwp.features import Features
+
+if TYPE_CHECKING:
+    from matplotlib.contour import QuadContourSet
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +187,7 @@ class MapGenerator:
         lons: np.ndarray,
         levels: np.ndarray,
         timestep: int,
-    ) -> None:
+    ) -> QuadContourSet:
         """Create a single feature map.
 
         Args:
@@ -192,6 +197,9 @@ class MapGenerator:
             lons: Longitude array
             levels: Contour levels
             timestep: Timestep index
+
+        Returns:
+            Contourf object for legend creation
         """
         map_crs = ccrs.Mercator(central_longitude=40)
         data_crs = ccrs.PlateCarree()
@@ -202,20 +210,20 @@ class MapGenerator:
 
         # Create contour plot with appropriate colormap
         if feature_name == "tp":
-            cmap = mcolors.ListedColormap(self.PRECIPITATION_COLORS, "custom_cmap")
-            norm = mcolors.BoundaryNorm(self.PRECIPITATION_LEVELS, cmap.N)
+            cmap_obj = mcolors.ListedColormap(self.PRECIPITATION_COLORS, "custom_cmap")
+            norm = mcolors.BoundaryNorm(self.PRECIPITATION_LEVELS, cmap_obj.N)
             cf = ax.contourf(
                 lons,
                 lats,
                 data,
                 levels=levels,
-                cmap=cmap,
+                cmap=cmap_obj,
                 transform=data_crs,
                 norm=norm,
             )
         else:
-            cmap = plt.colormaps[self.FEATURE_COLORMAPS.get(feature_name, "viridis")]
-            cf = ax.contourf(lons, lats, data, levels=levels, cmap=cmap, transform=data_crs)
+            cmap_obj = plt.colormaps[self.FEATURE_COLORMAPS.get(feature_name, "viridis")]
+            cf = ax.contourf(lons, lats, data, levels=levels, cmap=cmap_obj, transform=data_crs)
 
         # Clip to Poland boundary
         poland_path = self._get_poland_boundary()
@@ -225,8 +233,7 @@ class MapGenerator:
             facecolor="none",
         )
         ax.add_patch(patch)
-        for collection in cf.collections:
-            collection.set_clip_path(patch)
+        cf.set_clip_path(patch)
 
         ax.set_axis_off()
 
@@ -235,12 +242,12 @@ class MapGenerator:
         plt.savefig(output_path, bbox_inches="tight", pad_inches=0, transparent=True)
         plt.clf()
 
-        return cf  # Return for legend creation
+        return cf
 
     def _create_legend(
         self,
         feature_name: str,
-        cf: Any,
+        cf: QuadContourSet,
         ranges: np.ndarray,
     ) -> None:
         """Create a colorbar legend for a feature.
@@ -253,17 +260,18 @@ class MapGenerator:
         fig, ax = plt.subplots(figsize=(24, 3))
         cbar = plt.colorbar(cf, cax=ax, orientation="horizontal")
 
-        min_val = np.min(ranges)
-        max_val = np.max(ranges)
+        min_val = float(np.min(ranges))
+        max_val = float(np.max(ranges))
 
+        ticks: list[float]
         if feature_name == "t2m":
-            ticks = np.linspace(min_val, max_val, num=len(ranges))
+            ticks = list(np.linspace(min_val, max_val, num=len(ranges)))
             ticklabels = [f"{int(tick)}" for tick in ticks]
         elif feature_name == "tcc":
-            ticks = np.linspace(min_val, max_val, num=11)
+            ticks = list(np.linspace(min_val, max_val, num=11))
             ticklabels = [f"{int(tick * 100)}" for tick in ticks]
         else:
-            ticks = self.PRECIPITATION_LEVELS
+            ticks = list(self.PRECIPITATION_LEVELS)
             ticklabels = [f"{tick}" for tick in ticks]
             ticklabels[-1] = f"≥{int(ticks[-1])}"
 

@@ -9,18 +9,19 @@ import cartopy.feature as cfeature
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.cm import coolwarm
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import Normalize
 
 if TYPE_CHECKING:
-    from matplotlib.axes import Axes
+    from cartopy.mpl.geoaxes import GeoAxes
     from matplotlib.contour import QuadContourSet
     from numpy.typing import NDArray
 
+coolwarm = plt.cm.coolwarm  # type: ignore[attr-defined]
+
 
 def draw_poland(
-    ax: Axes,
+    ax: GeoAxes,
     data: NDArray[np.floating[Any]],
     title: str,
     cmap: str | Any,
@@ -67,8 +68,8 @@ def draw_poland(
     return contour_plot
 
 
-def draw_poland2(
-    ax: Axes,
+def draw_poland_animation(
+    ax: GeoAxes,
     X: NDArray[np.floating[Any]],
     title: str,
     cmap: str | Any,
@@ -168,7 +169,7 @@ def create_pred_animation(
 
     def update(frame: int) -> list[Any]:
         ax0.clear()
-        im0 = draw_poland2(
+        im0 = draw_poland_animation(
             ax=ax0,
             X=y[frame],
             title=r"$Y_{t2m}$",
@@ -179,7 +180,7 @@ def create_pred_animation(
         )
 
         ax1.clear()
-        im1 = draw_poland2(
+        im1 = draw_poland_animation(
             ax=ax1,
             X=y_hat[frame],
             title=r"$\hat{Y}_{t2m}$",

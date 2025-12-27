@@ -28,7 +28,7 @@ class GradBooster(BaselineRegressor):
         fh: int,
         feature_list: list[str],
         booster_type: BoosterType = BoosterType.LGB,
-        scaler_type: Scaler = Scaler.STANDARD,
+        scaler_type: type = Scaler.STANDARD,
         **kwargs: Any,
     ):
         """Initialize the gradient booster.

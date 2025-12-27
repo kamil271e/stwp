@@ -1,13 +1,13 @@
 """Linear regression models for weather prediction."""
 
 import copy
-from typing import Any
+from typing import Any, TypeAlias
 
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 
 from stwp.models.base import BaselineRegressor, RegressorType, Scaler
 
-LinearModel = ElasticNet | Lasso | LinearRegression | Ridge
+LinearModel: TypeAlias = ElasticNet | Lasso | LinearRegression | Ridge
 
 
 class LinearRegressor(BaselineRegressor):
@@ -20,7 +20,7 @@ class LinearRegressor(BaselineRegressor):
         feature_list: list[str],
         regressor_type: RegressorType = RegressorType.LINEAR,
         alpha: float = 1.0,
-        scaler_type: Scaler = Scaler.STANDARD,
+        scaler_type: type = Scaler.STANDARD,
     ):
         """Initialize the linear regressor.
 

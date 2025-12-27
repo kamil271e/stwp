@@ -157,5 +157,5 @@ class UNet(nn.Module):
         xd32 = relu(self.dec32(xd31))
 
         # Out
-        out = self.outconv(xd32)
+        out: torch.Tensor = self.outconv(xd32)
         return out

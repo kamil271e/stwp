@@ -54,6 +54,6 @@ class SpatioTemporalEncoder(nn.Module):
         X = self.mlp_embedder(X).relu()
         t = self.temporal_embedder(t.reshape(batch_size, 1, -1)).relu().permute((0, 2, 1))
         concat = torch.cat((X, t, s), dim=-1)
-        output = self.mlp_decoder(concat)
-        output = output.reshape((-1, self.input_X_dim))
-        return output
+        output: torch.Tensor = self.mlp_decoder(concat)
+        reshaped: torch.Tensor = output.reshape((-1, self.input_X_dim))
+        return reshaped

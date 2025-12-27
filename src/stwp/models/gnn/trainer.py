@@ -129,6 +129,8 @@ class Trainer:
 
     def init_architecture(self) -> None:
         """Initialize model architecture."""
+        if self.edge_attr is None or self.features is None:
+            raise ValueError("Data must be processed before initializing architecture")
         init_dict = {
             "arch": self.architecture,
             "input_features": self.features,
@@ -145,6 +147,8 @@ class Trainer:
 
     def init_train_details(self) -> None:
         """Initialize training details."""
+        if self.model is None:
+            raise ValueError("Model must be initialized before training details")
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
         self.lr_callback = LRAdjustCallback(self.optimizer, gamma=self.gamma)
         self.ckpt_callback = CkptCallback(self.model)
@@ -156,6 +160,8 @@ class Trainer:
         Args:
             path: Path to checkpoint file
         """
+        if self.model is None:
+            raise ValueError("Model must be initialized before loading")
         self.model.load_state_dict(torch.load(path))
 
     def train(self, num_epochs: int = 50, verbose: bool = False) -> None:
@@ -165,6 +171,18 @@ class Trainer:
             num_epochs: Number of training epochs
             verbose: Whether to print training progress
         """
+        if (
+            self.model is None
+            or self.train_loader is None
+            or self.val_loader is None
+            or self.optimizer is None
+            or self.subset is None
+            or self.val_size is None
+            or self.lr_callback is None
+            or self.ckpt_callback is None
+            or self.early_stop_callback is None
+        ):
+            raise ValueError("Trainer not properly initialized")
         start = time.time()
 
         val_loss_list = []
@@ -275,6 +293,8 @@ class Trainer:
         Returns:
             Tuple of (y, y_hat) arrays
         """
+        if self.model is None or self.features is None or self.scalers is None:
+            raise ValueError("Model not properly initialized")
         y = y.reshape((-1, self.latitude, self.longitude, self.features, self.cfg.forecast_horizon))
         y_hat = self.model(X, edge_index, edge_attr, t, s).reshape(
             (-1, self.latitude, self.longitude, self.features, self.cfg.forecast_horizon)
@@ -309,6 +329,10 @@ class Trainer:
             pretty: Whether to use pretty map plots
             save: Whether to save figures
         """
+        if self.train_loader is None or self.test_loader is None or self.val_loader is None:
+            raise ValueError("Data loaders not initialized")
+        if self.features is None or self.feature_list is None:
+            raise ValueError("Features not initialized")
         if data_type == "train":
             sample = next(iter(self.train_loader))
         elif data_type == "test":
@@ -359,11 +383,11 @@ class Trainer:
                     if k % 3 == 0:
                         title = rf"$Y^{{t+{ts + 1}}}_{{{feature_name}}}$"
                         value = y[i, ..., j, ts]
-                        cmap = plt.cm.coolwarm
+                        cmap = plt.cm.coolwarm  # type: ignore[attr-defined]
                     elif k % 3 == 1:
                         title = rf"$\hat{{Y}}^{{t+{ts + 1}}}_{{{feature_name}}}$"
                         value = y_hat[i, ..., j, ts]
-                        cmap = plt.cm.coolwarm
+                        cmap = plt.cm.coolwarm  # type: ignore[attr-defined]
                     else:
                         title = rf"$|Y - \hat{{Y}}|^{{t+{ts + 1}}}_{{{feature_name}}}$"
                         value = np.abs(y[i, ..., j, ts] - y_hat[i, ..., j, ts])
@@ -389,6 +413,10 @@ class Trainer:
             data_type: Type of data (train, test, val)
             pretty: Whether to use pretty map plots
         """
+        if self.train_loader is None or self.test_loader is None or self.val_loader is None:
+            raise ValueError("Data loaders not initialized")
+        if self.features is None or self.feature_list is None:
+            raise ValueError("Features not initialized")
         if data_type == "train":
             sample = next(iter(self.train_loader))
         elif data_type == "test":
@@ -468,6 +496,10 @@ class Trainer:
         Returns:
             Tuple of (metrics, y_hat)
         """
+        if self.train_loader is None or self.test_loader is None or self.val_loader is None:
+            raise ValueError("Data loaders not initialized")
+        if self.features is None:
+            raise ValueError("Features not initialized")
         if data_type == "train":
             loader = self.train_loader
         elif data_type == "test":
@@ -532,6 +564,10 @@ class Trainer:
         self.update_data_process()
         self.cfg.forecast_horizon = 1
 
+        if self.train_loader is None or self.test_loader is None or self.val_loader is None:
+            raise ValueError("Data loaders not initialized")
+        if self.features is None:
+            raise ValueError("Features not initialized")
         if data_type == "train":
             loader = self.train_loader
         elif data_type == "test":
@@ -619,6 +655,8 @@ class Trainer:
         Returns:
             Tuple of (rmse_features, mae_features)
         """
+        if self.feature_list is None:
+            raise ValueError("Feature list not initialized")
         rmse_features = []
         mae_features = []
         for i, feature_name in enumerate(self.feature_list):
@@ -654,6 +692,8 @@ class Trainer:
 
     def calculate_model_params(self) -> None:
         """Print number of model parameters."""
+        if self.model is None:
+            raise ValueError("Model not initialized")
         params = 0
         for p in self.model.parameters():
             params += p.reshape(-1).shape[0]
@@ -679,6 +719,8 @@ class Trainer:
         Returns:
             GNN model
         """
+        if self.model is None:
+            raise ValueError("Model not initialized")
         return self.model
 
     def predict_to_json(
@@ -697,6 +739,8 @@ class Trainer:
         Returns:
             Dictionary with predictions keyed by lat/lon/feature/timestamp
         """
+        if self.test_loader is None or self.features is None or self.feature_list is None:
+            raise ValueError("Trainer not properly initialized")
         if X is None:
             for i, data in enumerate(self.test_loader):
                 if i == which_sequence:
