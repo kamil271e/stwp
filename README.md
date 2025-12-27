@@ -71,26 +71,101 @@ In a significant achievement, we integrated our top-performing solution with a s
 More detailed analyses regarding each feature are included in the thesis.
 
 
-### Install prerequisites:
+### Installation
+
+Using [uv](https://docs.astral.sh/uv/) (recommended):
 ```shell
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+make install
 ```
 
-### Config pre-commit hooks
-<!-- Instruction [here](pre-commit-instruction.md). -->
+Or using pip:
 ```shell
-pip install -r requirements.txt
-pre-commit install
+pip install -e .
 ```
 
-### API dockerization
-Create image:
+### Development Setup
+
+Install with dev dependencies and pre-commit hooks:
 ```shell
-docker build -t meteo-api ./api
+make install-dev
 ```
-Run the container
+
+### Running Tests
+
 ```shell
-docker run -it --rm -p 8080:8888 --name api meteo-api
+make test          # Run all tests
+make test-cov      # Run tests with coverage report
+make test-unit     # Run unit tests only
+make test-api      # Run API tests only
 ```
+
+### Code Quality
+
+```shell
+make format        # Format code with ruff
+make lint          # Check code style
+make typecheck     # Run type checking with mypy
+make check         # Run all checks (lint + typecheck)
+```
+
+### Running the API
+
+Before running the API, you need to configure CDS API credentials for downloading weather data:
+1. Copy `api/.cdsapirc.example` to `api/.cdsapirc`
+2. Replace placeholders with your credentials from [CDS](https://cds.climate.copernicus.eu/)
+
+Locally:
+```shell
+make api
+```
+
+### Docker
+
+Using docker-compose (recommended):
+```shell
+make docker-run    # Build and start container
+make docker-logs   # View logs
+make docker-down   # Stop container
+```
+
+Or manually:
+```shell
+docker compose up -d
+```
+
+### Cleanup
+
+```shell
+make clean         # Remove build artifacts and caches
+```
+
+### All Available Commands
+
+Run `make help` to see all available Makefile targets.
+
+### Project Structure
+
+```
+.
+├── src/stwp/           # Main package
+│   ├── api/            # FastAPI application
+│   ├── config.py       # Unified configuration
+│   ├── features.py     # Centralized feature definitions
+│   ├── data/           # Data processing
+│   ├── models/         # ML models (GNN, CNN, baselines)
+│   └── utils/          # Utilities
+├── tests/              # Test suite
+├── demos/              # Jupyter notebooks
+├── hpo/                # Hyperparameter optimization
+└── exp/                # Experiment scripts
+```
+
+### Configuration
+
+Configuration can be customized via environment variables:
+- `STWP_DEVICE`: Device (cpu, cuda, mps)
+- `STWP_DATA_PATH`: Path to data file
+- `STWP_BATCH_SIZE`: Training batch size
+- `STWP_FORECAST_HORIZON`: Prediction horizon
+
+See `.env` for all available options.

@@ -1,0 +1,14 @@
+# CDS API Configuration
+# =====================
+# To use the Copernicus Climate Data Store (CDS) API:
+#
+# 1. Create an account at: https://cds.climate.copernicus.eu/
+# 2. Go to your profile page to get your API key
+# 3. Copy this file to ~/.cdsapirc or ./api/.cdsapirc
+# 4. Replace <YOUR_UID> and <YOUR_API_KEY> with your credentials
+#
+# The key format is: <UID>:<API_KEY>
+# Example: 12345:abcd1234-ef56-7890-ghij-klmnopqrstuv
+
+url: https://cds.climate.copernicus.eu/api/v2
+key: <YOUR_UID>:<YOUR_API_KEY>

@@ -1,21 +1,31 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements ./
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-RUN pip install --no-cache-dir -r requirements
+# Create non-root user
+RUN useradd -m -u 1000 app
 
-COPY script.sh .
+# Copy project files
+COPY pyproject.toml uv.lock ./
+COPY src/ ./src/
 
-RUN ./script.sh
+# Install dependencies
+RUN uv sync --frozen --no-dev
 
-COPY ./app/ .
+# CDS API credentials: Mount at runtime or provide via environment
+# Option 1: Mount file at runtime: -v ~/.cdsapirc:/home/app/.cdsapirc:ro
+# Option 2: Set environment variables CDS_API_URL and CDS_API_KEY
+# See api/.cdsapirc.example for format
 
-COPY ./model /model
-
-COPY ./.cdsapirc /root/
-
+# Set timezone and user
 ENV TZ=Europe/Warsaw
+USER app
 
-CMD ["python", "main.py"]
+# Expose port
+EXPOSE 8888
+
+# Run the API
+CMD ["uv", "run", "python", "-m", "stwp.api.main"]

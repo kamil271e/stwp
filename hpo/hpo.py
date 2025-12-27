@@ -1,1111 +1,839 @@
+"""Hyperparameter Optimization module for weather prediction models.
+
+This module provides a unified interface for running HPO studies across
+different model types (linear, gradient boosting, GNN, CNN).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+from typing import Any, Protocol
+
 import numpy as np
 import optuna
-import matplotlib.pyplot as plt
 import torch
-import json
-import time
-import sys
-import os
 
-sys.path.append("..")
+from stwp.config import Config
+from stwp.data.processor import DataProcessor
+from stwp.models.base import RegressorType
+from stwp.models.boosting.grad_booster import GradBooster
+from stwp.models.cnn.trainer import Trainer as CNNTrainer
+from stwp.models.gnn.gnn_module import ArchitectureType
+from stwp.models.gnn.trainer import Trainer as GNNTrainer
+from stwp.models.linear.linear_regressor import LinearRegressor
+from stwp.models.linear.simple_linear_regressor import SimpleLinearRegressor
+from stwp.utils.progress import print_progress_bar
 
-from models.data_processor import DataProcessor
-from models.linear_reg.linear_regressor import LinearRegressor
-from models.linear_reg.simple_linear_regressor import SimpleLinearRegressor
-from models.grad_boost.grad_booster import GradBooster
-from models.gnn.trainer import Trainer
-from models.cnn.trainer import Trainer as CNNTrainer
-from models.config import config as cfg
-
-from utils.progress_bar import printProgressBar
+logger = logging.getLogger(__name__)
 
 
-class InvalidBaselineException(Exception):
-    "Raised when baseline type in invalid"
-    pass
+class ModelType(StrEnum):
+    """Supported model types for HPO."""
+
+    SIMPLE_LINEAR = "simple-linear"
+    LINEAR = "linear"
+    LGBM = "lgbm"
+    GNN = "gnn"
+    CNN = "cnn"
+
+
+class InvalidModelTypeError(ValueError):
+    """Raised when an unsupported model type is specified."""
+
+    VALID_TYPES = [m.value for m in ModelType]
+
+    def __init__(self, model_type: str) -> None:
+        super().__init__(f"Invalid model type: '{model_type}'. Valid types: {self.VALID_TYPES}")
+
+
+@dataclass
+class HPOConfig:
+    """Configuration for hyperparameter optimization."""
+
+    model_type: ModelType
+    n_trials: int = 50
+    use_neighbours: bool = False
+    sequence_length: int = 1
+    forecast_horizon: int = 1
+    sequence_n_trials: int = 15
+    fh_n_trials: int = 15
+    num_epochs: int = 3
+    max_alpha: float = 10.0
+    subset: int | None = None
+
+    # Linear model defaults
+    sequence_alpha: float = 5.0
+    sequence_regressor: RegressorType = RegressorType.RIDGE
+
+    # GNN defaults
+    gnn_hidden_dim: int = 32
+    gnn_lr: float = 1e-3
+    gnn_architecture: ArchitectureType = ArchitectureType.TRANSFORMER
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> HPOConfig:
+        """Create config from dictionary."""
+        model_type = ModelType(data.pop("model_type", data.pop("baseline_type", "gnn")))
+        return cls(model_type=model_type, **data)
+
+
+@dataclass
+class StudyResults:
+    """Results from an HPO study."""
+
+    best_value: int
+    x_values: list[int] = field(default_factory=list)
+    y_values: list[float] = field(default_factory=list)
+    times: list[float] = field(default_factory=list)
+    raw_metrics: dict[int, Any] = field(default_factory=dict)
+
+
+@dataclass
+class HPOResults:
+    """Complete results from all HPO studies."""
+
+    sequence_results: StudyResults | None = None
+    fh_results: StudyResults | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+    scaler_metrics: dict[str, dict[str, float]] = field(default_factory=dict)
+    monthly_errors: dict[str, float] = field(default_factory=dict)
+    layer_results: StudyResults | None = None
+    error_maps: list[Any] = field(default_factory=list)
+
+
+class ModelTrainer(Protocol):
+    """Protocol for model trainers."""
+
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, **kwargs: Any) -> None:
+        """Train the model."""
+        ...
+
+    def predict(self, X_test: np.ndarray, y_test: np.ndarray) -> np.ndarray:
+        """Generate predictions."""
+        ...
+
+    def get_rmse(
+        self, y_hat: np.ndarray, y_test: np.ndarray, normalize: bool = True, **kwargs: Any
+    ) -> np.ndarray:
+        """Calculate RMSE metrics."""
+        ...
+
+    def save_prediction_tensor(self, y_hat: np.ndarray, path: str | None = None) -> None:
+        """Save predictions to file."""
+        ...
+
+
+class BaseModelHandler(ABC):
+    """Base class for model-specific HPO handling."""
+
+    def __init__(self, config: HPOConfig, processor: DataProcessor) -> None:
+        self.config = config
+        self.processor = processor
+        self.feature_list = processor.feature_list
+
+    @abstractmethod
+    def create_model(
+        self,
+        X_shape: tuple[int, ...],
+        forecast_horizon: int,
+        **params: Any,
+    ) -> Any:
+        """Create a model instance with given parameters."""
+        ...
+
+    @abstractmethod
+    def suggest_params(self, trial: optuna.Trial) -> dict[str, Any]:
+        """Suggest hyperparameters for Optuna trial."""
+        ...
+
+    def train_and_evaluate(
+        self,
+        X_train: np.ndarray,
+        X_test: np.ndarray,
+        y_train: np.ndarray,
+        y_test: np.ndarray,
+        X_shape: tuple[int, ...],
+        forecast_horizon: int,
+        normalize: bool = True,
+        **params: Any,
+    ) -> tuple[float, np.ndarray, np.ndarray | None]:
+        """Train model and return (mean_rmse, rmse_values, raw_rmse)."""
+        model = self.create_model(X_shape, forecast_horizon, **params)
+        model.train(X_train, y_train, normalize=normalize)
+        y_hat = model._predict(X_test, y_test)
+        rmse_values = model.get_rmse(y_hat, y_test, normalize=normalize)
+        raw_rmse = model.get_rmse(y_hat, y_test, normalize=False)
+        return float(np.mean(rmse_values)), rmse_values, raw_rmse
+
+
+class LinearModelHandler(BaseModelHandler):
+    """Handler for linear regression models."""
+
+    REGRESSOR_TYPES: list[str] = [
+        RegressorType.LASSO,
+        RegressorType.RIDGE,
+        RegressorType.ELASTIC_NET,
+    ]
+
+    def __init__(
+        self,
+        config: HPOConfig,
+        processor: DataProcessor,
+        simple: bool = False,
+    ) -> None:
+        super().__init__(config, processor)
+        self.simple = simple
+        self.model_class = SimpleLinearRegressor if simple else LinearRegressor
+
+    def create_model(
+        self,
+        X_shape: tuple[int, ...],
+        forecast_horizon: int,
+        **params: Any,
+    ) -> LinearRegressor | SimpleLinearRegressor:
+        defaults = {
+            "regressor_type": self.config.sequence_regressor,
+            "alpha": self.config.sequence_alpha,
+        }
+        defaults.update(params)
+        return self.model_class(X_shape, forecast_horizon, self.feature_list, **defaults)
+
+    def suggest_params(self, trial: optuna.Trial) -> dict[str, Any]:
+        return {
+            "alpha": trial.suggest_float("alpha", 0.1, self.config.max_alpha, log=True),
+            "regressor_type": trial.suggest_categorical("regressor_type", self.REGRESSOR_TYPES),
+        }
+
+
+class GradBoostHandler(BaseModelHandler):
+    """Handler for gradient boosting models."""
+
+    def create_model(
+        self,
+        X_shape: tuple[int, ...],
+        forecast_horizon: int,
+        **params: Any,
+    ) -> GradBooster:
+        return GradBooster(X_shape, forecast_horizon, self.feature_list, **params)
+
+    def suggest_params(self, trial: optuna.Trial) -> dict[str, Any]:
+        return {
+            "n_estimators": trial.suggest_int("n_estimators", 50, 400),
+            "max_depth": trial.suggest_int("max_depth", 3, 40),
+            "learning_rate": trial.suggest_float("learning_rate", 1e-4, 0.3, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 0.5, log=True),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 0.5, log=True),
+            "num_leaves": trial.suggest_int("num_leaves", 25, 50),
+        }
+
+
+class NeuralNetHandler(BaseModelHandler):
+    """Handler for neural network models (GNN/CNN)."""
+
+    def __init__(
+        self,
+        config: HPOConfig,
+        processor: DataProcessor,
+        is_gnn: bool = True,
+    ) -> None:
+        super().__init__(config, processor)
+        self.is_gnn = is_gnn
+        self._trainer: GNNTrainer | CNNTrainer | None = None
+
+    @property
+    def trainer(self) -> GNNTrainer | CNNTrainer:
+        """Lazily initialize trainer."""
+        if self._trainer is None:
+            if self.is_gnn:
+                self._trainer = GNNTrainer(
+                    architecture=self.config.gnn_architecture,
+                    hidden_dim=self.config.gnn_hidden_dim,
+                    lr=self.config.gnn_lr,
+                    subset=self.config.subset,
+                )
+            else:
+                self._trainer = CNNTrainer(
+                    subset=self.config.subset,
+                    test_shuffle=False,
+                )
+        return self._trainer
+
+    def create_model(
+        self,
+        X_shape: tuple[int, ...],
+        forecast_horizon: int,
+        **params: Any,
+    ) -> GNNTrainer | CNNTrainer:
+        return self.trainer
+
+    def suggest_params(self, trial: optuna.Trial) -> dict[str, Any]:
+        logger.info("HPO not implemented for neural networks")
+        return {}
+
+    def train_and_evaluate(
+        self,
+        X_train: np.ndarray,
+        X_test: np.ndarray,
+        y_train: np.ndarray,
+        y_test: np.ndarray,
+        X_shape: tuple[int, ...],
+        forecast_horizon: int,
+        normalize: bool = True,
+        input_size: int = 1,
+        graph_cells: int = 9,
+        verbose: bool = True,
+        **params: Any,
+    ) -> tuple[float, np.ndarray, np.ndarray]:
+        """Train neural network and evaluate."""
+        Config.forecast_horizon = forecast_horizon
+        Config.input_size = input_size
+        if self.is_gnn:
+            Config.graph_cells = graph_cells
+
+        self.trainer.update_config(Config)
+        self.trainer.train(num_epochs=self.config.num_epochs)
+
+        rmse_norm, y_hat_norm = self.trainer.evaluate("test", verbose=verbose, inverse_norm=False)
+        rmse_raw, y_hat_real = self.trainer.evaluate("test", verbose=verbose)
+
+        return float(np.mean(rmse_norm[0])), rmse_norm[0], rmse_raw[0]
+
+    def save_artifacts(
+        self,
+        output_dir: Path,
+        suffix: str,
+        y_hat_norm: np.ndarray,
+        y_hat_real: np.ndarray,
+    ) -> None:
+        """Save model state and predictions."""
+        output_dir.mkdir(exist_ok=True)
+        model_type = "gnn" if self.is_gnn else "cnn"
+
+        torch.save(
+            self.trainer.model.state_dict(),
+            output_dir / f"model_state_{model_type}_{suffix}.pt",
+        )
+        self.trainer.save_prediction_tensor(
+            y_hat_norm,
+            str(output_dir / f"prediction_tensor_{model_type}_{suffix}_norm.pt"),
+        )
+        self.trainer.save_prediction_tensor(
+            y_hat_real,
+            str(output_dir / f"prediction_tensor_{model_type}_{suffix}_real.pt"),
+        )
+
+
+def create_handler(config: HPOConfig, processor: DataProcessor) -> BaseModelHandler:
+    """Factory function to create appropriate model handler."""
+    handlers: dict[ModelType, type[BaseModelHandler] | tuple[type, dict[str, Any]]] = {
+        ModelType.SIMPLE_LINEAR: (LinearModelHandler, {"simple": True}),
+        ModelType.LINEAR: (LinearModelHandler, {"simple": False}),
+        ModelType.LGBM: GradBoostHandler,
+        ModelType.GNN: (NeuralNetHandler, {"is_gnn": True}),
+        ModelType.CNN: (NeuralNetHandler, {"is_gnn": False}),
+    }
+
+    handler_info = handlers.get(config.model_type)
+    if handler_info is None:
+        raise InvalidModelTypeError(str(config.model_type))
+
+    if isinstance(handler_info, tuple):
+        handler_class, kwargs = handler_info
+        return handler_class(config, processor, **kwargs)
+    return handler_info(config, processor)
 
 
 class HPO:
-    def __init__(
-        self,
-        baseline_type,
-        n_trials,
-        use_neighbours=False,
-        sequence_length=1,
-        forcasting_horizon=1,
-        sequence_n_trials=15,
-        sequence_alpha=5,
-        sequence_regressor="ridge",
-        fh_n_trials=15,
-        max_alpha=10,
-        num_epochs=3,
-        subset=None,
-    ):
-        self.baseline_type = baseline_type
-        self.n_trials = n_trials
-        self.use_neighbours = use_neighbours
-        self.sequence_n_trials = sequence_n_trials
-        self.sequence_alpha = sequence_alpha
-        self.sequence_regressor = sequence_regressor
-        self.fh_n_trials = fh_n_trials
+    """Hyperparameter Optimization orchestrator.
+
+    Provides a unified interface for running sequence length, forecast horizon,
+    and hyperparameter optimization studies across different model types.
+    """
+
+    SCALERS = ("standard", "min_max", "max_abs", "robust")
+    MONTHS = {
+        1: ("January", 1, 31),
+        2: ("February", 32, 59),
+        3: ("March", 60, 90),
+        4: ("April", 91, 120),
+        5: ("May", 121, 151),
+        6: ("June", 152, 181),
+        7: ("July", 182, 212),
+        8: ("August", 213, 243),
+        9: ("September", 244, 273),
+        10: ("October", 274, 304),
+        11: ("November", 305, 334),
+        12: ("December", 335, 365),
+    }
+
+    def __init__(self, config: HPOConfig | dict[str, Any]) -> None:
+        """Initialize HPO with configuration.
+
+        Args:
+            config: HPOConfig instance or dict with configuration values.
+        """
+        if isinstance(config, dict):
+            config = HPOConfig.from_dict(config)
+        self.config = config
+
         self.processor = DataProcessor()
-        self.data, self.feature_list = self.processor.data, self.processor.feature_list
-        self.best_s = sequence_length
-        self.fh = forcasting_horizon
-        self.best_fh = self.fh
-        self.regressors = ["lasso", "ridge", "elastic_net"]
+        self.data = self.processor.data
+        self.handler = create_handler(config, self.processor)
 
-        self.subset = subset
-        self.num_epochs = num_epochs
+        self.results = HPOResults()
+        self._best_sequence = config.sequence_length
+        self._best_fh = config.forecast_horizon
+        self._best_layer = 5
+        self._best_params: dict[str, Any] = {}
 
-        self.scalers = ["standard", "min_max", "max_abs", "robust"]
+        self._output_dir = Path(f"./{config.model_type.value}")
+        self._verbosity = False
 
-        self.max_alpha = max_alpha
-        self.verbosity = False
-        self.params = {}
+    @property
+    def best_sequence(self) -> int:
+        return self._best_sequence
 
-        self.sequence_plot_x = []
-        self.sequence_plot_y = []
+    @property
+    def best_fh(self) -> int:
+        return self._best_fh
 
-        self.sequence_plot_time = []
+    @property
+    def best_params(self) -> dict[str, Any]:
+        return self._best_params
 
-        self.fh_plot_x = []
-        self.fh_plot_y = []
-        self.fh_plot_time = []
+    def _is_neural_net(self) -> bool:
+        return self.config.model_type in (ModelType.GNN, ModelType.CNN)
 
-        self.metrics = []
-        self.metrics_mae = []
+    def _prepare_data(
+        self, sequence_length: int, forecast_horizon: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Prepare data for training."""
+        self.processor.upload_data(self.data)
+        return self.processor.preprocess(
+            sequence_length, forecast_horizon, self.config.use_neighbours
+        )
 
-        self.metrics_for_scalers = {}
+    def determine_best_sequence(self) -> StudyResults:
+        """Find optimal input sequence length.
 
-        self.not_normalized_plot_sequence = {}
-        self.not_normalized_plot_fh = {}
+        Returns:
+            StudyResults with sequence optimization data.
+        """
+        results = StudyResults(best_value=1)
+        best_rmse = float("inf")
 
-        self.month_error = {}
+        print_progress_bar(
+            0,
+            self.config.sequence_n_trials + 1,
+            prefix="Sequence Progress:",
+            suffix="Complete",
+            length=50,
+        )
 
-        self.gnn_verbose = True
-
-        self.best_alpha = 0.1
-        self.gnn_alpha_plot_x = []
-        self.gnn_alpha_plot_y = []
-
-        self.gnn_cell_plot_x = []
-        self.gnn_cell_plot_y = []
-
-        self.best_layer = 5
-
-        self.error_map = []
-
-        self.era_path = "../data/pred/"
-
-    def set_params(self, params):
-        self.params = params
-
-    def clear_sequence_plot(self):
-        self.sequence_plot_x = []
-        self.sequence_plot_y = []
-
-    def clear_alpha_plot(self):
-        self.gnn_alpha_plot_x = []
-        self.gnn_alpha_plot_y = []
-
-    def clear_fh_plot(self):
-        self.fh_plot_x = []
-        self.fh_plot_y = []
-
-    def clear_params(self):
-        self.params = {}
-
-    def sequence_objective(self, trial, max_sequence_length=15):
-        try:
-            s = trial.suggest_int("s", 1, max_sequence_length)
-            X, y = self.processor.preprocess(s, self.fh, self.use_neighbours)
+        for s in range(1, self.config.sequence_n_trials + 1):
+            X, y = self._prepare_data(s, self.config.forecast_horizon)
             X_train, X_test, y_train, y_test = self.processor.train_val_test_split(X, y)
+
             start_time = time.time()
-            if self.baseline_type == "simple-linear":
-                linearreg = SimpleLinearRegressor(
+
+            if self._is_neural_net():
+                mean_rmse, rmse_norm, rmse_raw = self.handler.train_and_evaluate(
+                    X_train,
+                    X_test,
+                    y_train,
+                    y_test,
                     X.shape,
-                    self.fh,
-                    self.feature_list,
-                    regressor_type=self.sequence_regressor,
-                    alpha=self.sequence_alpha,
+                    self.config.forecast_horizon,
+                    input_size=s,
+                    graph_cells=self._best_layer,
                 )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_test, y_test)
-                rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "linear":
-                linearreg = LinearRegressor(
-                    X.shape,
-                    self.fh,
-                    self.feature_list,
-                    regressor_type=self.sequence_regressor,
-                    alpha=self.sequence_alpha,
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_test, y_test)
-                rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "lgbm":
-                regressor = GradBooster(X.shape, self.fh, self.feature_list)
-                regressor.train(X_train, y_train, normalize=True)
-                y_hat = regressor.predict_(X_test, y_test)
-                rmse_values = regressor.get_rmse(y_hat, y_test, normalize=True)
-
-                mean_rmse = np.mean(rmse_values)
+                # Save neural net artifacts
+                if isinstance(self.handler, NeuralNetHandler):
+                    _, y_hat_norm = self.handler.trainer.evaluate(
+                        "test", verbose=False, inverse_norm=False
+                    )
+                    _, y_hat_real = self.handler.trainer.evaluate("test", verbose=False)
+                    self.handler.save_artifacts(self._output_dir, f"s{s}", y_hat_norm, y_hat_real)
             else:
-                raise InvalidBaselineException
+                mean_rmse, _, rmse_raw = self.handler.train_and_evaluate(
+                    X_train,
+                    X_test,
+                    y_train,
+                    y_test,
+                    X.shape,
+                    self.config.forecast_horizon,
+                )
 
-            end_time = time.time()
+            elapsed = time.time() - start_time
 
-            self.sequence_plot_x.append(s)
-            self.sequence_plot_y.append(mean_rmse)
+            results.x_values.append(s)
+            results.y_values.append(mean_rmse)
+            results.times.append(elapsed)
+            results.raw_metrics[s] = rmse_raw.tolist() if hasattr(rmse_raw, "tolist") else rmse_raw
 
-            execution_time = end_time - start_time
-            self.sequence_plot_time.append(execution_time)
+            if mean_rmse < best_rmse:
+                best_rmse = mean_rmse
+                results.best_value = s
 
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
-            )
-        return mean_rmse
-
-    def determine_best_s(self):
-        try:
-            self.clear_sequence_plot()
-            best_s = 0
-            max_rmse = np.inf
-
-            printProgressBar(
-                0,
-                self.sequence_n_trials + 1,
-                prefix=" Sequence Progress:",
+            print_progress_bar(
+                s,
+                self.config.sequence_n_trials + 1,
+                prefix="Sequence Progress:",
                 suffix="Complete",
                 length=50,
             )
 
-            if self.baseline_type == "gnn":
-                trainer = Trainer(
-                    architecture="trans", hidden_dim=32, lr=1e-3, subset=self.subset
+        self._best_sequence = results.best_value
+        self.results.sequence_results = results
+        return results
+
+    def determine_best_fh(self) -> StudyResults:
+        """Find optimal forecast horizon.
+
+        Returns:
+            StudyResults with forecast horizon optimization data.
+        """
+        results = StudyResults(best_value=1)
+        best_rmse = float("inf")
+
+        print_progress_bar(
+            0,
+            self.config.fh_n_trials + 1,
+            prefix="Forecast Horizon Progress:",
+            suffix="Complete",
+            length=50,
+        )
+
+        for fh in range(1, self.config.fh_n_trials + 1):
+            X, y = self._prepare_data(self._best_sequence, fh)
+            X_train, X_test, y_train, y_test = self.processor.train_val_test_split(X, y)
+
+            start_time = time.time()
+
+            if self._is_neural_net():
+                mean_rmse, rmse_norm, rmse_raw = self.handler.train_and_evaluate(
+                    X_train,
+                    X_test,
+                    y_train,
+                    y_test,
+                    X.shape,
+                    fh,
+                    input_size=self._best_sequence,
+                    graph_cells=self._best_layer,
                 )
-            elif self.baseline_type == "cnn":
-                trainer = CNNTrainer(subset=self.subset, test_shuffle=False)
-
-            for s in range(1, self.sequence_n_trials + 1):
-                self.processor.upload_data(self.data)
-                X, y = self.processor.preprocess(s, self.fh, self.use_neighbours)
-                X_train, X_test, y_train, y_test = self.processor.train_val_test_split(
-                    X, y
-                )
-                start_time = time.time()
-                if self.baseline_type == "simple-linear":
-                    linearreg = SimpleLinearRegressor(
-                        X.shape,
-                        self.fh,
-                        self.feature_list,
-                        regressor_type=self.sequence_regressor,
-                        alpha=self.sequence_alpha,
+                if isinstance(self.handler, NeuralNetHandler):
+                    _, y_hat_norm = self.handler.trainer.evaluate(
+                        "test", verbose=False, inverse_norm=False
                     )
-                    linearreg.train(X_train, y_train, normalize=True)
-                    y_hat = linearreg.predict_(X_test, y_test)
-                    rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                    rmse_not_normalized = linearreg.get_rmse(
-                        y_hat, y_test, normalize=False
+                    _, y_hat_real = self.handler.trainer.evaluate("test", verbose=False)
+                    self.handler.save_artifacts(
+                        self._output_dir, f"fh_{fh}", y_hat_norm, y_hat_real
                     )
-                    print(rmse_not_normalized)
-                    mean_rmse = np.mean(rmse_values)
-
-                    linearreg.save_prediction_tensor(y_hat)
-
-                elif self.baseline_type == "linear":
-                    linearreg = LinearRegressor(
-                        X.shape,
-                        self.fh,
-                        self.feature_list,
-                        regressor_type=self.sequence_regressor,
-                        alpha=self.sequence_alpha,
-                    )
-                    linearreg.train(X_train, y_train, normalize=True)
-                    y_hat = linearreg.predict_(X_test, y_test)
-                    rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                    rmse_not_normalized = linearreg.get_rmse(
-                        y_hat, y_test, normalize=False
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    linearreg.save_prediction_tensor(y_hat)
-                elif self.baseline_type == "lgbm":
-                    regressor = GradBooster(X.shape, self.fh, self.feature_list)
-                    regressor.train(X_train, y_train, normalize=True)
-                    y_hat = regressor.predict_(X_test, y_test)
-                    rmse_values = regressor.get_rmse(y_hat, y_test, normalize=True)
-
-                    rmse_not_normalized = regressor.get_rmse(
-                        y_hat, y_test, normalize=False
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    # regressor.save_prediction_tensor(y_hat)
-                elif self.baseline_type == "gnn":
-                    cfg.FH = self.fh
-                    cfg.INPUT_SIZE = s
-                    cfg.GRAPH_CELLS = self.best_layer
-                    trainer.update_config(cfg)
-                    trainer.train(num_epochs=self.num_epochs)
-                    rmse_values, y_hat_normalized = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose, inverse_norm=False
-                    )
-                    rmse_values = rmse_values[0]
-                    rmse_not_normalized, y_hat_real = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose
-                    )
-                    rmse_not_normalized = rmse_not_normalized[0]
-
-                    if not (os.path.isdir(f"./{self.baseline_type}")):
-                        os.mkdir(f"./{self.baseline_type}")
-
-                    torch.save(
-                        trainer.model.state_dict(),
-                        f"./{self.baseline_type}/model_state_{self.baseline_type}_s{s}.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_normalized,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_s_{s}_norm.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_real,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_s_{s}_real.pt",
-                    )
-
-                    mean_rmse = np.mean(rmse_values)
-                elif self.baseline_type == "cnn":
-                    cfg.FH = self.fh
-                    cfg.INPUT_SIZE = s
-                    trainer.update_config(cfg)
-                    trainer.train(self.num_epochs)
-                    rmse_values, y_hat_normalized = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose, inverse_norm=False
-                    )
-                    rmse_values = rmse_values[0]
-                    rmse_not_normalized, y_hat_real = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose
-                    )
-                    rmse_not_normalized = rmse_not_normalized[0]
-                    mean_rmse = np.mean(rmse_values)
-
-                    if not (os.path.isdir(f"./{self.baseline_type}")):
-                        os.mkdir(f"./{self.baseline_type}")
-
-                    torch.save(
-                        trainer.model.state_dict(),
-                        f"./{self.baseline_type}/model_state_{self.baseline_type}_s{s}.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_normalized,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_s_{s}_norm.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_real,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_s_{s}_real.pt",
-                    )
-                else:
-                    raise InvalidBaselineException
-
-                end_time = time.time()
-
-                self.sequence_plot_x.append(s)
-                self.sequence_plot_y.append(mean_rmse)
-
-                self.not_normalized_plot_sequence[s] = rmse_not_normalized
-
-                execution_time = end_time - start_time
-                self.sequence_plot_time.append(execution_time)
-
-                if mean_rmse < max_rmse:
-                    max_rmse = mean_rmse
-                    best_s = s
-
-                printProgressBar(
-                    s,
-                    self.sequence_n_trials + 1,
-                    prefix="Sequence Progress:",
-                    suffix="Complete",
-                    length=50,
+            else:
+                mean_rmse, _, rmse_raw = self.handler.train_and_evaluate(
+                    X_train,
+                    X_test,
+                    y_train,
+                    y_test,
+                    X.shape,
+                    fh,
+                    **self._best_params,
                 )
 
-            self.best_s = best_s
+            elapsed = time.time() - start_time
 
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
+            results.x_values.append(fh)
+            results.y_values.append(mean_rmse)
+            results.times.append(elapsed)
+            results.raw_metrics[fh] = rmse_raw.tolist() if hasattr(rmse_raw, "tolist") else rmse_raw
+
+            if mean_rmse < best_rmse:
+                best_rmse = mean_rmse
+                results.best_value = fh
+
+            print_progress_bar(
+                fh,
+                self.config.fh_n_trials + 1,
+                prefix="Forecast Horizon Progress:",
+                suffix="Complete",
+                length=50,
             )
 
-    def objective(self, trial):
-        try:
-            self.processor.upload_data(self.data)
-            X, y = self.processor.preprocess(
-                input_size=self.best_s, fh=self.fh, use_neighbours=self.use_neighbours
+        self._best_fh = results.best_value
+        self.results.fh_results = results
+        return results
+
+    def run_param_study(self) -> dict[str, Any]:
+        """Run Optuna study for hyperparameter optimization.
+
+        Returns:
+            Best parameters found.
+        """
+        if self._is_neural_net():
+            logger.info("Parameter HPO not implemented for neural networks")
+            return {}
+
+        def objective(trial: optuna.Trial) -> float:
+            X, y = self._prepare_data(self._best_sequence, self.config.forecast_horizon)
+            X_train, X_val, _, y_train, y_val, _ = self.processor.train_val_test_split(
+                X, y, split_type=0
             )
-            (
+            params = self.handler.suggest_params(trial)
+            mean_rmse, _, _ = self.handler.train_and_evaluate(
                 X_train,
                 X_val,
-                X_test,
                 y_train,
                 y_val,
-                y_test,
-            ) = self.processor.train_val_test_split(X, y, split_type=0)
-
-            if self.baseline_type == "simple-linear":
-                alpha = trial.suggest_float("alpha", 0.1, self.max_alpha, log=True)
-                regressor_type = trial.suggest_categorical(
-                    "regressor_type", self.regressors
-                )
-                # print(f"alpha: {alpha}")
-                linearreg = SimpleLinearRegressor(
-                    X.shape,
-                    self.fh,
-                    self.feature_list,
-                    regressor_type=regressor_type,
-                    alpha=alpha,
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_val, y_val)
-                rmse_values = linearreg.get_rmse(y_hat, y_val, normalize=True)
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "linear":
-                alpha = trial.suggest_float("alpha", 0.1, self.max_alpha, log=True)
-                regressor_type = trial.suggest_categorical(
-                    "regressor_type", self.regressors
-                )
-                linearreg = LinearRegressor(
-                    X.shape,
-                    self.fh,
-                    self.feature_list,
-                    regressor_type=regressor_type,
-                    alpha=alpha,
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_val, y_val)
-                rmse_values = linearreg.get_rmse(y_hat, y_val, normalize=True)
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "lgbm":
-                params = {
-                    "n_estimators": trial.suggest_int("n_estimators", 50, 400),
-                    "max_depth": trial.suggest_int("max_depth", 3, 40),
-                    "learning_rate": trial.suggest_float(
-                        "learning_rate", 1e-4, 0.3, log=True
-                    ),
-                    "reg_lambda": trial.suggest_float(
-                        "reg_lambda", 1e-3, 0.5, log=True
-                    ),
-                    "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 0.5, log=True),
-                    "num_leaves": trial.suggest_int("num_leaves", 25, 50),
-                }
-                regressor = GradBooster(X.shape, self.fh, self.feature_list, **params)
-                regressor.train(X_train, y_train, normalize=True)
-                y_hat = regressor.predict_(X_val, y_val)
-                rmse_values = regressor.get_rmse(y_hat, y_val, normalize=True)
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "gnn" or self.baseline_type == "cnn":
-                print("HPO not implemented for neural nets")
-                return 0
-            else:
-                raise InvalidBaselineException
-
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
+                X.shape,
+                self.config.forecast_horizon,
+                **params,
             )
+            return mean_rmse
 
-        return mean_rmse
-
-    def fh_objective(self, trial, max_fh=5):
-        try:
-            fh = trial.suggest_int("fh", 1, max_fh)
-            self.processor.upload_data(self.data)
-            X, y = self.processor.preprocess(self.best_s, fh, self.use_neighbours)
-            X_train, X_test, y_train, y_test = self.processor.train_val_test_split(X, y)
-            start_time = time.time()
-            if self.baseline_type == "simple-linear":
-                linearreg = SimpleLinearRegressor(
-                    X.shape, fh, self.feature_list, **self.params
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_test, y_test)
-                rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "linear":
-                linearreg = LinearRegressor(
-                    X.shape, fh, self.feature_list, **self.params
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_test, y_test)
-                rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                mean_rmse = np.mean(rmse_values)
-            elif self.baseline_type == "lgbm":
-                regressor = GradBooster(X.shape, fh, self.feature_list, **self.params)
-                regressor.train(X_train, y_train, normalize=True)
-                y_hat = regressor.predict_(X_test, y_test)
-                rmse_values = regressor.get_rmse(y_hat, y_test, normalize=True)
-
-                mean_rmse = np.mean(rmse_values)
-            else:
-                raise InvalidBaselineException
-
-            end_time = time.time()
-            self.fh_plot_x.append(fh)
-            self.fh_plot_y.append(mean_rmse)
-            execution_time = end_time - start_time
-            self.fh_plot_time.append(execution_time)
-
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
-            )
-
-        return mean_rmse
-
-    def determine_best_fh(self):
-        try:
-            self.clear_fh_plot()
-            best_fh = 0
-            max_rmse = np.inf
-            printProgressBar(
-                0,
-                self.sequence_n_trials + 1,
-                prefix=" Forcasting Horizon Progress:",
-                suffix="Complete",
-                length=50,
-            )
-
-            if self.baseline_type == "gnn":
-                trainer = Trainer(
-                    architecture="trans", hidden_dim=32, lr=1e-3, subset=self.subset
-                )
-            elif self.baseline_type == "cnn":
-                trainer = CNNTrainer(subset=self.subset, test_shuffle=False)
-
-            for fh in range(1, self.fh_n_trials + 1):
-                # processor = DataProcessor(self.data)
-                self.processor.upload_data(self.data)
-                X, y = self.processor.preprocess(self.best_s, fh, self.use_neighbours)
-                X_train, X_test, y_train, y_test = self.processor.train_val_test_split(
-                    X, y
-                )
-                start_time = time.time()
-                if self.baseline_type == "simple-linear":
-                    linearreg = SimpleLinearRegressor(
-                        X.shape,
-                        fh,
-                        self.feature_list,
-                        regressor_type=self.sequence_regressor,
-                        alpha=self.sequence_alpha,
-                    )
-                    linearreg.train(X_train, y_train, normalize=True)
-                    y_hat = linearreg.predict_(X_test, y_test)
-                    rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                    rmse_not_normalized = linearreg.get_rmse(
-                        y_hat, y_test, normalize=False
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    linearreg.save_prediction_tensor(y_hat)
-
-                elif self.baseline_type == "linear":
-                    linearreg = LinearRegressor(
-                        X.shape,
-                        fh,
-                        self.feature_list,
-                        regressor_type=self.sequence_regressor,
-                        alpha=self.sequence_alpha,
-                    )
-                    linearreg.train(X_train, y_train, normalize=True)
-                    y_hat = linearreg.predict_(X_test, y_test)
-                    rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-                    rmse_not_normalized = linearreg.get_rmse(
-                        y_hat, y_test, normalize=False
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    linearreg.save_prediction_tensor(y_hat)
-                elif self.baseline_type == "lgbm":
-                    regressor = GradBooster(X.shape, fh, self.feature_list)
-                    regressor.train(X_train, y_train, normalize=True)
-                    y_hat = regressor.predict_(X_test, y_test)
-                    rmse_values = regressor.get_rmse(y_hat, y_test, normalize=True)
-                    rmse_not_normalized = regressor.get_rmse(
-                        y_hat, y_test, normalize=False
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    # regressor.save_prediction_tensor(y_hat)
-                elif self.baseline_type == "gnn":
-                    cfg.FH = fh
-                    cfg.INPUT_SIZE = self.best_s
-                    cfg.GRAPH_CELLS = self.best_layer
-                    trainer.update_config(cfg)
-                    trainer.train(num_epochs=self.num_epochs)
-                    rmse_values, y_hat_normalized = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose, inverse_norm=False
-                    )
-                    rmse_values = rmse_values[0]
-                    # rmse_values, _ = trainer.autoreg_evaluate("test", fh=fh, verbose=False)
-                    rmse_not_normalized, y_hat_real = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose
-                    )
-                    rmse_not_normalized = rmse_not_normalized[0]
-                    mean_rmse = np.mean(rmse_values)
-
-                    if not (os.path.isdir(f"./{self.baseline_type}")):
-                        os.mkdir(f"./{self.baseline_type}")
-
-                    torch.save(
-                        trainer.model.state_dict(),
-                        f"./{self.baseline_type}/model_state_{self.baseline_type}_fh_{fh}.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_normalized,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_fh_{fh}_norm.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_real,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_fh_{fh}_real.pt",
-                    )
-
-                elif self.baseline_type == "cnn":
-                    cfg.FH = fh
-                    cfg.INPUT_SIZE = self.best_s
-                    trainer.update_config(cfg)
-                    trainer.train(self.num_epochs)
-                    rmse_values, y_hat_normalized = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose, inverse_norm=False
-                    )
-                    rmse_values = rmse_values[0]
-                    rmse_not_normalized, y_hat_real = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose
-                    )
-                    rmse_not_normalized = rmse_not_normalized[0]
-                    mean_rmse = np.mean(rmse_values)
-
-                    if not (os.path.isdir(f"./{self.baseline_type}")):
-                        os.mkdir(f"./{self.baseline_type}")
-
-                    torch.save(
-                        trainer.model.state_dict(),
-                        f"./{self.baseline_type}/model_state_{self.baseline_type}_fh_{fh}.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_normalized,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_fh_{fh}_norm.pt",
-                    )
-
-                    trainer.save_prediction_tensor(
-                        y_hat_real,
-                        f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_fh_{fh}_real.pt",
-                    )
-                else:
-                    raise InvalidBaselineException
-
-                end_time = time.time()
-
-                self.fh_plot_x.append(fh)
-                self.fh_plot_y.append(mean_rmse)
-
-                self.not_normalized_plot_fh[fh] = rmse_not_normalized
-
-                execution_time = end_time - start_time
-                self.fh_plot_time.append(execution_time)
-
-                if mean_rmse < max_rmse:
-                    max_rmse = mean_rmse
-                    best_fh = fh
-
-                printProgressBar(
-                    fh,
-                    self.fh_n_trials + 1,
-                    prefix="Forcasting Horizon Progress:",
-                    suffix="Complete",
-                    length=50,
-                )
-
-            self.best_fh = best_fh
-
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
-            )
-
-    def run_sequence_study(self):
-        self.clear_sequence_plot()
-        study = optuna.create_study(direction="minimize")
-        study.optimize(self.sequence_objective, n_trials=self.sequence_n_trials)
-        if self.verbosity == False:
+        if not self._verbosity:
             optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-        self.best_s = study.best_params["s"]
-        print("Sequence length study finished.")
-
-    def run_study(self):
-        self.clear_params()
         study = optuna.create_study(direction="minimize")
-        study.optimize(self.objective, n_trials=self.n_trials)
-        if self.verbosity == False:
-            optuna.logging.set_verbosity(optuna.logging.WARNING)
+        study.optimize(objective, n_trials=self.config.n_trials)
 
-        self.params = study.best_params
-        print("Parameter study finished.")
+        self._best_params = study.best_params
+        self.results.params = study.best_params
+        logger.info("Parameter study finished")
+        return study.best_params
 
-    def run_fh_study(self):
-        self.clear_fh_plot()
-        study = optuna.create_study(direction="minimize")
-        study.optimize(self.fh_objective, n_trials=self.sequence_n_trials)
-        if self.verbosity == False:
-            optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def run_full_study(self) -> HPOResults:
+        """Run complete HPO pipeline: sequence -> params -> forecast horizon.
 
-        self.best_fh = study.best_params["fh"]
-        print("Forcasting horizon study finished.")
-
-    def run_full_study(self):
-        self.determine_best_s()
-        if self.baseline_type not in ["gnn", "cnn"]:
-            self.run_study()
+        Returns:
+            Complete HPOResults with all study data.
+        """
+        self.determine_best_sequence()
+        if not self._is_neural_net():
+            self.run_param_study()
         self.determine_best_fh()
-        self.write_params_to_json()
-        self.write_plots_to_json()
+        self.save_results()
+        return self.results
 
-    def report(self):
-        self.plot_sequence()
-        print(f"Best s => {self.best_s}")
-        self.print_parameters()
-        self.plot_fh()
-        print(f"Best fh=> {self.best_fh}")
+    def test_scalers(self, model_path: str | None = None) -> dict[str, dict[str, float]]:
+        """Test different scaler types.
 
-    def run_and_report(self):
-        self.run_full_study()
-        self.report()
+        Args:
+            model_path: Optional path to pre-trained model.
 
-    def plot_sequence(self):
-        plt.scatter(self.sequence_plot_x, self.sequence_plot_y)
-        plt.title("Sequence length")
-        plt.xlabel("s")
-        plt.ylabel("mean_rmse")
-        plt.show()
+        Returns:
+            Dictionary mapping scaler names to their metrics.
+        """
+        scaler_metrics: dict[str, dict[str, float]] = {}
 
-    def plot_fh(self):
-        plt.scatter(self.sequence_plot_x, self.sequence_plot_y)
-        plt.title("Forcasting horizon")
-        plt.xlabel("fh")
-        plt.ylabel("mean_rmse")
-        plt.show()
+        for scaler in self.SCALERS:
+            X, y = self._prepare_data(self._best_sequence, self._best_fh)
+            X_train, X_test, y_train, y_test = self.processor.train_val_test_split(X, y)
 
-    def print_parameters(self):
-        print("Best parameters:")
+            start_time = time.time()
 
-        for key, value in self.params.items():
-            print(key, ":", value)
+            if self._is_neural_net():
+                Config.scaler_type = scaler
+                mean_rmse, _, _ = self.handler.train_and_evaluate(
+                    X_train,
+                    X_test,
+                    y_train,
+                    y_test,
+                    X.shape,
+                    self._best_fh,
+                    input_size=self._best_sequence,
+                    graph_cells=self._best_layer,
+                )
+            else:
+                handler = create_handler(self.config, self.processor)
+                model = handler.create_model(
+                    X.shape,
+                    self._best_fh,
+                    scaler_type=scaler,
+                    **self._best_params,
+                )
+                model.train(X_train, y_train, normalize=True)
+                y_hat = model._predict(X_test, y_test)
+                rmse = model.get_rmse(y_hat, y_test, normalize=True)
+                mean_rmse = float(np.mean(rmse))
 
-    def write_params_to_json(self):
-        file_name = self.baseline_type + "-params.json"
-        with open(file_name, "w") as outfile:
-            json.dump(self.params, outfile)
+            elapsed = time.time() - start_time
+            scaler_metrics[scaler] = {"rmse": mean_rmse, "execution_time": elapsed}
 
-    def write_plots_to_json(self):
-        file_name = f"modelsplots.json"
-        data = {}
+        self.results.scaler_metrics = scaler_metrics
+        return scaler_metrics
 
-        # Load existing data from file
-        try:
-            with open(file_name, "r") as infile:
-                data = json.load(infile)
-        except FileNotFoundError:
-            pass
+    def monthly_error(self, model_path: str | None = None) -> dict[str, float]:
+        """Calculate prediction error by month.
 
-        # Update data with new arrays
-        data[self.baseline_type] = {
-            "sequence_plot_x": self.sequence_plot_x,
-            "sequence_plot_y": self.sequence_plot_y,
-            "sequence_plot_time": self.sequence_plot_time,
-            "fh_plot_x": self.fh_plot_x,
-            "fh_plot_y": self.fh_plot_y,
-            "fh_plot_time": self.fh_plot_time,
-            "metrics": self.metrics,
-            "metrics_for_scalers": self.metrics_for_scalers,
-            "not_normalized_plot_sequence": self.not_normalized_plot_sequence,
-            "not_normalized_plot_fh": self.not_normalized_plot_fh,
-            "month_error": self.month_error,
-            "gnn_alpha_plot_x": self.gnn_alpha_plot_x,
-            "gnn_alpha_plot_y": self.gnn_alpha_plot_y,
-            "gnn_cell_plot_x": self.gnn_cell_plot_x,
-            "gnn_cell_plot_y": self.gnn_cell_plot_y,
+        Args:
+            model_path: Optional path to pre-trained model.
+
+        Returns:
+            Dictionary mapping month names to RMSE values.
+        """
+        monthly_errors: dict[str, float] = {}
+
+        X, y = self._prepare_data(self._best_sequence, self._best_fh)
+        X_train, X_test, y_train, y_test = self.processor.train_val_test_split(
+            X, y, split_type=2, test_shuffle=False
+        )
+
+        if self._is_neural_net():
+            if model_path:
+                self.handler.trainer.load_model(model_path)
+            else:
+                Config.forecast_horizon = self._best_fh
+                Config.input_size = self._best_sequence
+                if self.config.model_type == ModelType.GNN:
+                    Config.graph_cells = self._best_layer
+                self.handler.trainer.update_config(Config)
+                self.handler.trainer.train(num_epochs=self.config.num_epochs)
+
+            for _month_num, (name, start_day, end_day) in self.MONTHS.items():
+                rmse, _ = self.handler.trainer.evaluate(
+                    "test",
+                    verbose=False,
+                    inverse_norm=False,
+                    begin=start_day,
+                    end=end_day,
+                )
+                monthly_errors[name] = float(np.mean(rmse[0]))
+        else:
+            model = self.handler.create_model(X.shape, self._best_fh, **self._best_params)
+            model.train(X_train, y_train, normalize=True)
+            y_hat = model._predict(X_test, y_test)
+
+            for month_num, (name, start_day, end_day) in self.MONTHS.items():
+                begin, end = self._get_month_indices(month_num, start_day, end_day)
+                rmse = model.get_rmse(y_hat, y_test, normalize=True, begin=begin, end=end)
+                monthly_errors[name] = float(np.mean(rmse))
+
+        self.results.monthly_errors = monthly_errors
+        return monthly_errors
+
+    def _get_month_indices(self, month: int, start_day: int, end_day: int) -> tuple[int, int]:
+        """Convert month day range to data indices (4 samples per day)."""
+        samples_per_day = 4
+        if month == 1:
+            return start_day - 1, self.MONTHS[2][1] * samples_per_day
+        elif month == 12:
+            return start_day * samples_per_day + 1, end_day * samples_per_day + 1
+        else:
+            next_month_start = self.MONTHS[month + 1][1]
+            return start_day * samples_per_day + 1, next_month_start * samples_per_day + 1
+
+    def gnn_layer_study(self, models: list[str] | None = None) -> StudyResults:
+        """Study effect of GNN layer count.
+
+        Args:
+            models: Optional list of pre-trained model paths.
+
+        Returns:
+            StudyResults with layer optimization data.
+        """
+        if self.config.model_type != ModelType.GNN:
+            raise ValueError("Layer study only available for GNN models")
+
+        results = StudyResults(best_value=2)
+        best_rmse = float("inf")
+
+        layer_range = range(2, 10)
+
+        for i, cell_count in enumerate(layer_range):
+            if models:
+                Config.graph_cells = cell_count
+                self.handler.trainer.update_config(Config)
+                self.handler.trainer.load_model(models[i])
+            else:
+                Config.forecast_horizon = self.config.forecast_horizon
+                Config.input_size = self._best_sequence
+                Config.graph_cells = cell_count
+                self.handler.trainer.update_config(Config)
+                self.handler.trainer.train(num_epochs=self.config.num_epochs)
+
+            rmse_norm, y_hat_norm = self.handler.trainer.evaluate(
+                "test", verbose=False, inverse_norm=False
+            )
+            _, y_hat_real = self.handler.trainer.evaluate("test", verbose=False)
+            mean_rmse = float(np.mean(rmse_norm[0]))
+
+            results.x_values.append(cell_count)
+            results.y_values.append(mean_rmse)
+
+            if mean_rmse < best_rmse:
+                best_rmse = mean_rmse
+                results.best_value = cell_count
+
+            if not models:
+                self.handler.save_artifacts(
+                    self._output_dir, f"cell_{cell_count}", y_hat_norm, y_hat_real
+                )
+
+        self._best_layer = results.best_value
+        self.results.layer_results = results
+        return results
+
+    def save_results(self) -> None:
+        """Save all results to JSON files."""
+        # Save parameters
+        params_file = f"{self.config.model_type.value}-params.json"
+        with open(params_file, "w") as f:
+            json.dump(self._best_params, f, indent=2)
+
+        # Save plots data
+        self._save_plots_data()
+
+        # Save error maps if available
+        self._output_dir.mkdir(exist_ok=True)
+        if self.results.error_maps:
+            np.save(self._output_dir / "error_maps.npy", self.results.error_maps)
+
+    def _save_plots_data(self) -> None:
+        """Save plot data to modelsplots.json."""
+        plots_file = Path("modelsplots.json")
+        data: dict[str, Any] = {}
+
+        if plots_file.exists():
+            with open(plots_file) as f:
+                data = json.load(f)
+
+        model_key = self.config.model_type.value
+        seq = self.results.sequence_results
+        fh = self.results.fh_results
+        layer = self.results.layer_results
+
+        data[model_key] = {
+            "sequence_plot_x": seq.x_values if seq else [],
+            "sequence_plot_y": seq.y_values if seq else [],
+            "sequence_plot_time": seq.times if seq else [],
+            "fh_plot_x": fh.x_values if fh else [],
+            "fh_plot_y": fh.y_values if fh else [],
+            "fh_plot_time": fh.times if fh else [],
+            "metrics": [],
+            "metrics_for_scalers": self.results.scaler_metrics,
+            "not_normalized_plot_sequence": seq.raw_metrics if seq else {},
+            "not_normalized_plot_fh": fh.raw_metrics if fh else {},
+            "month_error": self.results.monthly_errors,
+            "gnn_alpha_plot_x": [],
+            "gnn_alpha_plot_y": [],
+            "gnn_cell_plot_x": layer.x_values if layer else [],
+            "gnn_cell_plot_y": layer.y_values if layer else [],
         }
 
-        # Write data to file
-        with open(file_name, "w") as outfile:
-            json.dump(data, outfile)
+        with open(plots_file, "w") as f:
+            json.dump(data, f, indent=2)
 
-        if not (os.path.isdir(f"./{self.baseline_type}")):
-            os.mkdir(f"./{self.baseline_type}")
-
-        np.save(f"./{self.baseline_type}/error_maps.npy", self.error_map)
-
-    def test_scalers(self, model=None):
-        try:
-            for scaler in self.scalers:
-                self.processor.upload_data(self.data)
-                X, y = self.processor.preprocess(
-                    self.best_s, self.best_fh, self.use_neighbours
-                )
-                X_train, X_test, y_train, y_test = self.processor.train_val_test_split(
-                    X, y
-                )
-                start_time = time.time()
-                if self.baseline_type == "simple-linear":
-                    linearreg = SimpleLinearRegressor(
-                        X.shape,
-                        self.best_fh,
-                        self.feature_list,
-                        regressor_type=self.sequence_regressor,
-                        alpha=self.sequence_alpha,
-                        scaler_type=scaler,
-                    )
-                    linearreg.train(X_train, y_train, normalize=True)
-                    y_hat = linearreg.predict_(X_test, y_test)
-                    rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                    mean_rmse = np.mean(rmse_values)
-
-                elif self.baseline_type == "linear":
-                    linearreg = LinearRegressor(
-                        X.shape,
-                        self.best_fh,
-                        self.feature_list,
-                        regressor_type=self.sequence_regressor,
-                        alpha=self.sequence_alpha,
-                        scaler_type=scaler,
-                    )
-                    linearreg.train(X_train, y_train, normalize=True)
-                    y_hat = linearreg.predict_(X_test, y_test)
-                    rmse_values = linearreg.get_rmse(y_hat, y_test, normalize=True)
-
-                    mean_rmse = np.mean(rmse_values)
-                elif self.baseline_type == "lgbm":
-                    regressor = GradBooster(
-                        X.shape, self.best_fh, self.feature_list, scaler_type=scaler
-                    )
-                    regressor.train(X_train, y_train, normalize=True)
-                    y_hat = regressor.predict_(X_test, y_test)
-                    rmse_values = regressor.get_rmse(y_hat, y_test, normalize=True)
-
-                    mean_rmse = np.mean(rmse_values)
-                elif self.baseline_type == "gnn":
-                    trainer = Trainer(
-                        architecture="trans", hidden_dim=32, lr=1e-3, subset=self.subset
-                    )
-                    if model is None:
-                        cfg.FH = self.best_fh
-                        cfg.INPUT_SIZE = self.best_s
-                        cfg.GRAPH_CELLS = self.best_layer
-                        cfg.SCALER_TYPE = scaler
-                        trainer.update_config(cfg)
-                        trainer.train(num_epochs=self.num_epochs)
-                    else:
-                        trainer.load_model(model)
-
-                    rmse_values, _ = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose, inverse_norm=False
-                    )
-                    rmse_values = rmse_values[0]
-                    mean_rmse = np.mean(rmse_values)
-                elif self.baseline_type == "cnn":
-                    trainer = CNNTrainer(subset=self.subset, test_shuffle=False)
-                    if model is None:
-                        cfg.FH = self.best_fh
-                        cfg.INPUT_SIZE = self.best_s
-                        cfg.SCALER_TYPE = scaler
-                        trainer.update_config(cfg)
-                        trainer.train(self.num_epochs)
-                    else:
-                        trainer.load_model(model)
-                    rmse_values, _ = trainer.evaluate(
-                        "test", verbose=self.gnn_verbose, inverse_norm=False
-                    )
-                    rmse_values = rmse_values[0]
-                    mean_rmse = np.mean(rmse_values)
-                else:
-                    raise InvalidBaselineException
-
-                end_time = time.time()
-
-                execution_time = end_time - start_time
-
-                self.metrics_for_scalers[scaler] = {
-                    "rmse": mean_rmse,
-                    "execution_time": execution_time,
-                }
-
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
-            )
-
-    def monthly_error(self, model=None):
-        try:
-            months_days = {
-                1: (1, 31),
-                2: (32, 59),
-                3: (60, 90),
-                4: (91, 120),
-                5: (121, 151),
-                6: (152, 181),
-                7: (182, 212),
-                8: (213, 243),
-                9: (244, 273),
-                10: (274, 304),
-                11: (305, 334),
-                12: (335, 365),
-            }
-
-            months_names = {
-                1: "January",
-                2: "February",
-                3: "March",
-                4: "April",
-                5: "May",
-                6: "June",
-                7: "July",
-                8: "August",
-                9: "September",
-                10: "October",
-                11: "November",
-                12: "December",
-            }
-
-            if self.baseline_type == "gnn":
-                trainer = Trainer(
-                    architecture="trans",
-                    hidden_dim=32,
-                    lr=1e-3,
-                    subset=self.subset,
-                    test_shuffle=False,
-                )
-            elif self.baseline_type == "cnn":
-                trainer = CNNTrainer(subset=self.subset, test_shuffle=False)
-
-            # for month in range(1, 13):
-            self.processor.upload_data(self.data)
-            X, y = self.processor.preprocess(
-                self.best_s, self.best_fh, self.use_neighbours
-            )
-            X_train, X_test, y_train, y_test = self.processor.train_val_test_split(
-                X, y, split_type=2, test_shuffle=False
-            )
-            # start_time = time.time()
-            if self.baseline_type == "simple-linear":
-                linearreg = SimpleLinearRegressor(
-                    X.shape,
-                    self.best_fh,
-                    self.feature_list,
-                    regressor_type=self.sequence_regressor,
-                    alpha=self.sequence_alpha,
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_test, y_test)
-                for month in range(1, 13):
-                    if month == 1:
-                        begin = months_days[month][0] - 1
-                        end = months_days[month + 1][0] * 4
-                    elif month == 12:
-                        begin = months_days[month][0] * 4 + 1
-                        end = months_days[month][1] * 4 + 1
-                    else:
-                        begin = months_days[month][0] * 4 + 1
-                        end = months_days[month + 1][0] * 4 + 1
-                    rmse_values = linearreg.get_rmse(
-                        y_hat,
-                        y_test,
-                        normalize=True,
-                        begin=begin,
-                        end=end,
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    self.month_error[months_names[month]] = mean_rmse
-
-            elif self.baseline_type == "linear":
-                linearreg = LinearRegressor(
-                    X.shape,
-                    self.best_fh,
-                    self.feature_list,
-                    regressor_type=self.sequence_regressor,
-                    alpha=self.sequence_alpha,
-                )
-                linearreg.train(X_train, y_train, normalize=True)
-                y_hat = linearreg.predict_(X_test, y_test)
-                for month in range(1, 13):
-                    if month == 1:
-                        begin = months_days[month][0] - 1
-                        end = months_days[month + 1][0] * 4
-                    elif month == 12:
-                        begin = months_days[month][0] * 4 + 1
-                        end = months_days[month][1] * 4 + 1
-                    else:
-                        begin = months_days[month][0] * 4 + 1
-                        end = months_days[month + 1][0] * 4 + 1
-                    rmse_values = linearreg.get_rmse(
-                        y_hat,
-                        y_test,
-                        normalize=True,
-                        begin=begin,
-                        end=end,
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    self.month_error[months_names[month]] = mean_rmse
-
-            elif self.baseline_type == "lgbm":
-                regressor = GradBooster(X.shape, self.best_fh, self.feature_list)
-                regressor.train(X_train, y_train, normalize=True)
-                y_hat = regressor.predict_(X_test, y_test)
-                for month in range(1, 13):
-                    if month == 1:
-                        begin = months_days[month][0] - 1
-                        end = months_days[month + 1][0] * 4
-                    elif month == 12:
-                        begin = months_days[month][0] * 4 + 1
-                        end = months_days[month][1] * 4 + 1
-                    else:
-                        begin = months_days[month][0] * 4 + 1
-                        end = months_days[month + 1][0] * 4 + 1
-                    rmse_values = regressor.get_rmse(
-                        y_hat,
-                        y_test,
-                        normalize=True,
-                        begin=begin,
-                        end=end,
-                    )
-                    mean_rmse = np.mean(rmse_values)
-                    self.month_error[months_names[month]] = mean_rmse
-
-            elif self.baseline_type == "gnn":
-                if model is None:
-                    cfg.FH = self.best_fh
-                    cfg.INPUT_SIZE = self.best_s
-                    cfg.GRAPH_CELLS = self.best_layer
-                    trainer.update_config(cfg)
-                    trainer.train(num_epochs=self.num_epochs)
-                else:
-                    trainer.load_model(model)
-                for month in range(1, 13):
-                    rmse_values, _ = trainer.evaluate(
-                        "test",
-                        verbose=self.gnn_verbose,
-                        inverse_norm=False,
-                        begin=months_days[month][0],
-                        end=months_days[month][1],
-                    )
-                    rmse_values = rmse_values[0]
-                    mean_rmse = np.mean(rmse_values)
-                    self.month_error[months_names[month]] = mean_rmse
-
-            elif self.baseline_type == "cnn":
-                if model is None:
-                    cfg.FH = self.best_fh
-                    cfg.INPUT_SIZE = self.best_s
-                    trainer.update_config(cfg)
-                    trainer.train(num_epochs=self.num_epochs)
-                else:
-                    trainer.load_model(model)
-                for month in range(1, 13):
-                    rmse_values, _ = trainer.evaluate(
-                        "test",
-                        verbose=self.gnn_verbose,
-                        inverse_norm=False,
-                        begin=months_days[month][0],
-                        end=months_days[month][1],
-                    )
-                    rmse_values = rmse_values[0]
-                    mean_rmse = np.mean(rmse_values)
-                    self.month_error[months_names[month]] = mean_rmse
-
-            else:
-                raise InvalidBaselineException
-        except InvalidBaselineException:
-            print(
-                "Exception occurred: Invalid Baseline, choose between 'linear' , 'simple-linear', 'lgbm', 'gnn' and 'cnn'"
-            )
-
-    def gnn_layer(self, models=None):
-        trainer = Trainer(
-            architecture="trans", hidden_dim=32, lr=1e-3, subset=self.subset
-        )
-        best_layer = 2
-        max_rmse = np.inf
-        if models is None:
-            for cell in range(2, 10):
-                cfg.FH = self.fh
-                cfg.INPUT_SIZE = self.best_s
-                cfg.GRAPH_CELLS = cell
-                trainer.update_config(cfg)
-                trainer.train(num_epochs=self.num_epochs)
-                rmse_values, y_hat_normalized = trainer.evaluate(
-                    "test", verbose=self.gnn_verbose, inverse_norm=False
-                )
-                rmse_values = rmse_values[0]
-                rmse_not_normalized, y_hat_real = trainer.evaluate(
-                    "test", verbose=self.gnn_verbose
-                )
-                rmse_not_normalized = rmse_not_normalized[0]
-                mean_rmse = np.mean(rmse_values)
-                self.gnn_cell_plot_x.append(cell)
-                self.gnn_cell_plot_y.append(mean_rmse)
-
-                if mean_rmse < max_rmse:
-                    max_rmse = mean_rmse
-                    best_layer = cell
-
-                if not (os.path.isdir(f"./{self.baseline_type}")):
-                    os.mkdir(f"./{self.baseline_type}")
-
-                torch.save(
-                    trainer.model.state_dict(),
-                    f"./{self.baseline_type}/model_state_{self.baseline_type}_cell_{cell}.pt",
-                )
-
-                trainer.save_prediction_tensor(
-                    y_hat_normalized,
-                    f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_cell_{cell}_norm.pt",
-                )
-
-                trainer.save_prediction_tensor(
-                    y_hat_real,
-                    f"./{self.baseline_type}/prediction_tensor_{self.baseline_type}_cell_{cell}_real.pt",
-                )
-
-        else:
-            for i, model in enumerate(models, start=2):
-                cfg.GRAPH_CELLS = i
-                trainer.update_config(cfg)
-                trainer.load_model(model)
-                rmse_values, y_hat_normalized = trainer.evaluate(
-                    "test", verbose=self.gnn_verbose, inverse_norm=False
-                )
-                rmse_values = rmse_values[0]
-                rmse_not_normalized, y_hat_real = trainer.evaluate(
-                    "test", verbose=self.gnn_verbose
-                )
-                mean_rmse = np.mean(rmse_values)
-                self.gnn_cell_plot_x.append(i)
-                self.gnn_cell_plot_y.append(mean_rmse)
-
-                if mean_rmse < max_rmse:
-                    max_rmse = mean_rmse
-                    best_layer = i
-
-        self.best_layer = best_layer
+    def report(self) -> None:
+        """Print summary report of HPO results."""
+        logger.info(f"Best sequence length: {self._best_sequence}")
+        logger.info(f"Best forecast horizon: {self._best_fh}")
+        if self._best_params:
+            logger.info("Best parameters:")
+            for key, value in self._best_params.items():
+                logger.info(f"  {key}: {value}")
